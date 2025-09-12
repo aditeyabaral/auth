@@ -5,9 +5,9 @@
 [![Lint](https://github.com/pesu-dev/auth/actions/workflows/lint.yaml/badge.svg)](https://github.com/pesu-dev/auth/actions/workflows/lint.yaml)
 [![Deploy](https://github.com/pesu-dev/auth/actions/workflows/deploy-prod.yaml/badge.svg)](https://github.com/pesu-dev/auth/actions/workflows/deploy-prod.yaml)
 
-[![Docker Automated build](https://img.shields.io/docker/automated/aditeyabaral/pesu-auth?logo=docker)](https://hub.docker.com/r/aditeyabaral/pesu-auth/builds)
-[![Docker Image Version (tag)](https://img.shields.io/docker/v/aditeyabaral/pesu-auth/latest?logo=docker&label=build%20commit)](https://hub.docker.com/r/aditeyabaral/pesu-auth/tags)
-[![Docker Image Size (tag)](https://img.shields.io/docker/image-size/aditeyabaral/pesu-auth/latest?logo=docker)](https://hub.docker.com/r/aditeyabaral/pesu-auth)
+[![Docker Automated build](https://img.shields.io/docker/automated/pesudev/pesu-auth?logo=docker)](https://hub.docker.com/r/pesudev/pesu-auth/builds)
+[![Docker Image Version (tag)](https://img.shields.io/docker/v/pesudev/pesu-auth/latest?logo=docker&label=build%20commit)](https://hub.docker.com/r/pesudev/pesu-auth/tags)
+[![Docker Image Size (tag)](https://img.shields.io/docker/image-size/pesudev/pesu-auth/latest?logo=docker)](https://hub.docker.com/r/pesudev/pesu-auth)
 
 A simple and lightweight API to authenticate PESU credentials using PESU Academy.
 
@@ -30,12 +30,14 @@ returns the user's profile information. No personal data is stored.
 > All timestamps are in UTC.
 
 > [!WARNING]
-> The live version is hosted on a free tier server. As a result, you might experience higher latency compared to a local
-> deployment.
+> The live version is hosted on a free tier server located in the United States. As a result, you *might* experience higher latencies and slower response times.
 
 ## How to run PESUAuth locally
 
 Running the PESUAuth API locally is simple. Clone the repository and follow the steps below to get started.
+
+> [!TIP]
+> We recommend running the API locally using Docker for ease of use, the best performance, and lowest latency.
 
 ### Running with Docker
 
@@ -51,17 +53,17 @@ following commands to start the API.
        ```
 
     2. You can also pull the pre-built Docker image
-       from [Docker Hub](https://hub.docker.com/repository/docker/aditeyabaral/pesu-auth/general) by running the
+       from [Docker Hub](https://hub.docker.com/repository/docker/pesudev/pesu-auth/general) by running the
        following command:
        ```bash
-       docker pull aditeyabaral/pesu-auth:latest
+       docker pull pesudev/pesu-auth:latest
        ```
 
 2. Run the Docker container
     ```bash
     docker run --name pesu-auth -d -p 5000:5000 pesu-auth
     # If you pulled the pre-built image, use the following command instead:
-    docker run --name pesu-auth -d -p 5000:5000 aditeyabaral/pesu-auth:latest
+    docker run --name pesu-auth -d -p 5000:5000 pesudev/pesu-auth:latest
     ```
 
 3. Access the API at `http://localhost:5000/`
