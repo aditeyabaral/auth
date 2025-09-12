@@ -30,7 +30,7 @@ returns the user's profile information. No personal data is stored.
 > All timestamps are in UTC.
 
 > [!WARNING]
-> The live version is hosted on a free tier server located in the United States. As a result, you *might* experience higher latencies and slower response times.
+> The live version is hosted on a free tier server located in the United States. As a result, you *might* experience higher latencies and slower response times, compared to running the API locally or on a server closer to your location.
 
 ## How to run PESUAuth locally
 
