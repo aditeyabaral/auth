@@ -149,3 +149,47 @@ def test_validate_know_your_class_and_section_int_rejected():
             "knowYourClassAndSection": 1,
         })
     assert "Input should be a valid boolean" in str(exc_info.value)
+
+
+def test_validate_deprecated_know_your_class_and_section_key_rejected():
+    """Test that the old snake_case know_your_class_and_section key is rejected as an extra field."""
+    with pytest.raises(ValidationError) as exc_info:
+        RequestModel.model_validate({
+            "username": "testuser",
+            "password": "testpass",
+            "know_your_class_and_section": True,
+        })
+    errors = exc_info.value.errors()
+    assert any(e["type"] == "extra_forbidden" for e in errors)
+    assert "Extra inputs are not permitted" in str(exc_info.value)
+
+
+def test_validate_unknown_extra_key_rejected():
+    """Test that any unknown key is rejected."""
+    with pytest.raises(ValidationError) as exc_info:
+        RequestModel.model_validate({
+            "username": "testuser",
+            "password": "testpass",
+            "someRandomField": "value",
+        })
+    errors = exc_info.value.errors()
+    assert any(e["type"] == "extra_forbidden" for e in errors)
+    assert "Extra inputs are not permitted" in str(exc_info.value)
+
+
+def test_validate_deprecated_campus_code_in_fields_rejected():
+    """Test that the old snake_case campus_code is rejected as a fields value."""
+    with pytest.raises(ValidationError) as exc_info:
+        RequestModel(username="testuser", password="testpass", fields=["campus_code"])
+    errors = exc_info.value.errors()
+    assert any(e["type"] == "literal_error" for e in errors)
+    assert "fields.0" in str(exc_info.value)
+
+
+def test_validate_deprecated_institute_name_in_fields_rejected():
+    """Test that the old snake_case institute_name is rejected as a fields value."""
+    with pytest.raises(ValidationError) as exc_info:
+        RequestModel(username="testuser", password="testpass", fields=["institute_name"])
+    errors = exc_info.value.errors()
+    assert any(e["type"] == "literal_error" for e in errors)
+    assert "fields.0" in str(exc_info.value)

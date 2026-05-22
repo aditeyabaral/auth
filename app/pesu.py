@@ -47,7 +47,6 @@ class PESUAcademy:
         "phone",
         "campusCode",
         "campus",
-        "semester",
         "cycle",
         "department",
         "instituteName",

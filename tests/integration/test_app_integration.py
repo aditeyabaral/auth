@@ -437,3 +437,69 @@ def test_integration_authenticate_kycas_without_requesting(client):
     data = response.json()
     assert data["status"] is True
     assert data.get("knowYourClassAndSection") is None
+
+
+def test_integration_authenticate_deprecated_know_your_class_and_section_key_rejected(client):
+    """Test that the old snake_case know_your_class_and_section key is rejected with 400."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "know_your_class_and_section": True,
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.know_your_class_and_section: Extra inputs are not permitted" in data["message"]
+
+
+def test_integration_authenticate_unknown_extra_key_rejected(client):
+    """Test that any unknown key in the request body is rejected with 400."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "someUnknownField": "value",
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.someUnknownField: Extra inputs are not permitted" in data["message"]
+
+
+def test_integration_authenticate_deprecated_campus_code_in_fields_rejected(client):
+    """Test that the old snake_case campus_code is rejected as a fields value."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "profile": True,
+        "fields": ["campus_code"],
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.fields.0" in data["message"]
+
+
+def test_integration_authenticate_deprecated_institute_name_in_fields_rejected(client):
+    """Test that the old snake_case institute_name is rejected as a fields value."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "profile": True,
+        "fields": ["institute_name"],
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.fields.0" in data["message"]

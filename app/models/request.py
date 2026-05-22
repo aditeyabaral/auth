@@ -11,7 +11,7 @@ from app.pesu import PESUAcademy
 class RequestModel(BaseModel):
     """Model representing the student's authentication request."""
 
-    model_config = ConfigDict(strict=True, alias_generator=to_camel)
+    model_config = ConfigDict(strict=True, alias_generator=to_camel, extra="forbid")
 
     username: str = Field(
         ...,
