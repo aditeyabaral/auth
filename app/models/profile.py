@@ -3,12 +3,13 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
 class ProfileModel(BaseModel):
     """Model representing the user's profile data returned after successful authentication."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, alias_generator=to_camel, populate_by_name=True)
 
     name: str | None = Field(
         None,

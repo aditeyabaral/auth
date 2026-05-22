@@ -45,12 +45,12 @@ class PESUAcademy:
         "section",
         "email",
         "phone",
-        "campus_code",
+        "campusCode",
         "campus",
         "semester",
         "cycle",
         "department",
-        "institute_name",
+        "instituteName",
     ]
 
     PROFILE_PAGE_HEADER_TO_KEY_MAP = {
@@ -72,7 +72,7 @@ class PESUAcademy:
         "Cycle": "cycle",
         "Department": "department",
         "Branch": "branch",
-        "Institute Name": "institute_name",
+        "Institute Name": "instituteName",
     }
 
     def __init__(self) -> None:
@@ -254,7 +254,7 @@ class PESUAcademy:
         # If username starts with PES1, then they are from RR campus, else if it is PES2, then EC campus
         if profile.get("prn") and (campus_code_match := re.match(r"PES(\d)", profile["prn"])):
             campus_code = campus_code_match.group(1)
-            profile["campus_code"] = int(campus_code)
+            profile["campusCode"] = int(campus_code)
             if campus_code == "1":
                 profile["campus"] = "RR"
             elif campus_code == "2":
@@ -440,19 +440,19 @@ class PESUAcademy:
                 'Fetching "Know Your Class and Section" data...',
             )
             # Fetch the class and section information
-            result["know_your_class_and_section"] = await self.get_know_your_class_and_section(
+            result["knowYourClassAndSection"] = await self.get_know_your_class_and_section(
                 client,
                 csrf_token,
                 username,
             )
             # Filter the fields if field filtering is enabled
             if field_filtering:
-                result["know_your_class_and_section"] = {
-                    key: value for key, value in result["know_your_class_and_section"].items() if key in fields
+                result["knowYourClassAndSection"] = {
+                    key: value for key, value in result["knowYourClassAndSection"].items() if key in fields
                 }
                 logging.info(
                     f'Field filtering enabled. Filtered "Know Your Class and Section" data for user={username}: '
-                    f"{result['know_your_class_and_section']}",
+                    f"{result['knowYourClassAndSection']}",
                 )
 
         logging.info(f"Authentication process for user={username} completed successfully.")

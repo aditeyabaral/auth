@@ -127,7 +127,7 @@ async def test_authenticate_with_all_profile_fields(pesu_academy: PESUAcademy):
         "section",
         "email",
         "phone",
-        "campus_code",
+        "campusCode",
         "campus",
     ]
 
@@ -150,7 +150,7 @@ async def test_authenticate_with_all_profile_fields(pesu_academy: PESUAcademy):
     assert profile["section"] == section
     assert profile["email"] == email
     assert profile["phone"] == phone
-    assert profile["campus_code"] == campus_code
+    assert profile["campusCode"] == campus_code
     assert profile["campus"] == campus
 
 
@@ -185,8 +185,8 @@ async def test_authenticate_with_kycas(pesu_academy: PESUAcademy):
     )
     assert result["status"] is True
     assert "Login successful" in result["message"]
-    assert "know_your_class_and_section" in result
-    kycas = result["know_your_class_and_section"]
+    assert "knowYourClassAndSection" in result
+    kycas = result["knowYourClassAndSection"]
     assert "prn" in kycas or "srn" in kycas
     assert "name" in kycas
 
@@ -209,7 +209,7 @@ async def test_authenticate_with_kycas_and_profile(pesu_academy: PESUAcademy):
     )
     assert result["status"] is True
     assert "profile" in result
-    assert "know_your_class_and_section" in result
+    assert "knowYourClassAndSection" in result
 
 
 @pytest.mark.secret_required
@@ -228,7 +228,7 @@ async def test_authenticate_with_kycas_field_filtering(pesu_academy: PESUAcademy
         fields=["name", "semester"],
     )
     assert result["status"] is True
-    kycas = result["know_your_class_and_section"]
+    kycas = result["knowYourClassAndSection"]
     assert "name" in kycas
     assert "semester" in kycas
     assert "prn" not in kycas
@@ -251,4 +251,4 @@ async def test_authenticate_without_kycas(pesu_academy: PESUAcademy):
         fields=None,
     )
     assert result["status"] is True
-    assert "know_your_class_and_section" not in result
+    assert "knowYourClassAndSection" not in result

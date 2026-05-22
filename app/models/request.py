@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic.alias_generators import to_camel
 
 from app.pesu import PESUAcademy
 
@@ -10,7 +11,7 @@ from app.pesu import PESUAcademy
 class RequestModel(BaseModel):
     """Model representing the student's authentication request."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, alias_generator=to_camel)
 
     username: str = Field(
         ...,

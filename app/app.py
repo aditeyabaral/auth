@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="PESUAuth API",
     description="A simple and lightweight API to authenticate PESU credentials using PESU Academy",
-    version="2.1.0",
+    version="3.0.0",
     docs_url="/",
     lifespan=lifespan,
     openapi_tags=[
@@ -216,7 +216,7 @@ async def authenticate(payload: RequestModel, background_tasks: BackgroundTasks)
     try:
         authentication_result = ResponseModel.model_validate(authentication_result)
         logging.info(f"Returning auth result for user={username}: {authentication_result}")
-        authentication_result = authentication_result.model_dump(exclude_none=True)
+        authentication_result = authentication_result.model_dump(by_alias=True, exclude_none=True)
         authentication_result["timestamp"] = current_time.isoformat()
         return JSONResponse(
             status_code=200,

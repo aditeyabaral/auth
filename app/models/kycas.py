@@ -1,12 +1,13 @@
 """Model representing the "Know Your Class and Section" data returned after successful authentication."""
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
 class KYCASModel(BaseModel):
     """Model representing the "Know Your Class and Section" data."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, alias_generator=to_camel, populate_by_name=True)
 
     prn: str | None = Field(
         None,
