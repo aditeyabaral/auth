@@ -1,9 +1,12 @@
-FROM python:3.14-slim-bookworm
+FROM python:3.12-slim-bookworm
 
-COPY app /app
-COPY README.md /README.md
-COPY requirements.txt /requirements.txt
+WORKDIR /pesu-auth
 
-RUN pip install -r requirements.txt
+COPY requirements.txt .
+COPY pyproject.toml .
+COPY README.md .
+COPY app ./app
+
+RUN pip install -r requirements.txt && pip install --no-deps .
 
 CMD ["python", "-m", "app.app"]
