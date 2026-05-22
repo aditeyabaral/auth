@@ -1,6 +1,6 @@
 [project]
 name = "pesu-auth"
-version = "2.1.0"
+version = "3.0.0"
 description = "A simple API to authenticate PESU credentials using PESU Academy."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -68,7 +68,7 @@ convention = "google"
 
 [tool.ruff]
 line-length = 120
-target-version = "py314"
+target-version = "py312"
 exclude = [
     "tests/"
 ]
