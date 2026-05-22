@@ -1,9 +1,10 @@
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.app import app, main
+from app.app import _csrf_token_refresh_loop, app, main
 
 
 @pytest.fixture
@@ -36,6 +37,20 @@ def test_authenticate_general_exception(mock_authenticate, client):
     assert response.status_code == 500
     data = response.json()
     assert "Internal Server Error" in data["message"]
+
+
+@pytest.mark.asyncio
+@patch("asyncio.sleep", new_callable=AsyncMock)
+@patch("app.app._refresh_csrf_token_with_lock")
+async def test_csrf_token_refresh_loop_logs_exception_on_failure(mock_refresh, mock_sleep, caplog):
+    mock_refresh.side_effect = RuntimeError("Simulated CSRF refresh failure")
+    mock_sleep.side_effect = asyncio.CancelledError
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(asyncio.CancelledError):
+            await _csrf_token_refresh_loop()
+
+    assert "Failed to refresh unauthenticated CSRF token in the background." in caplog.text
 
 
 @patch("app.app.argparse.ArgumentParser.parse_args")
