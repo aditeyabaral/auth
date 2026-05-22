@@ -6,11 +6,17 @@ on:
     types:
       - completed
 
+concurrency:
+  group: deploy-staging-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
 jobs:
   # Deploy to staging environment
   deploy-staging:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev' }}
+    permissions:
+      contents: write
     env:
       RENDER_DEPLOY_HOOK_URL_DEV: ${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }}
     steps:
@@ -20,6 +26,54 @@ jobs:
             echo "❌ Staging deploy hook missing!"
             exit 1
           fi
+
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: dev
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Pull latest dev
+        run: git pull --rebase origin dev
+
+      - name: Bump patch version
+        run: |
+          python3 - <<'EOF'
+          import re
+
+          with open("pyproject.toml") as f:
+              content = f.read()
+
+          match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"', content, re.MULTILINE)
+          major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+          new_version = f"{major}.{minor}.{patch + 1}"
+
+          new_content = re.sub(
+              r'^version = "\d+\.\d+\.\d+"',
+              f'version = "{new_version}"',
+              content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+
+          with open("pyproject.toml", "w") as f:
+              f.write(new_content)
+
+          print(f"Bumped: {major}.{minor}.{patch} -> {new_version}")
+          EOF
+
+      - name: Commit and push
+        run: |
+          git add pyproject.toml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: bump patch version [skip ci]"
+          git push origin dev
 
       - name: Deploy to Staging Environment
         run: |
