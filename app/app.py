@@ -6,6 +6,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.metadata import version
 
 import pytz
 import uvicorn
@@ -76,7 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="PESUAuth API",
     description="A simple and lightweight API to authenticate PESU credentials using PESU Academy",
-    version="3.0.0",
+    version=version("pesu-auth"),
     docs_url="/",
     lifespan=lifespan,
     openapi_tags=[
