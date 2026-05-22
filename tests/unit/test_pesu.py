@@ -887,3 +887,19 @@ def test_default_fields_includes_kycas_relevant_fields():
     assert "cycle" in fields
     assert "department" in fields
     assert "instituteName" in fields
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_prefetch_client_closes_old_client_on_second_call(mock_fetch, pesu):
+    old_client = AsyncMock()
+    new_client = AsyncMock()
+    mock_fetch.side_effect = [
+        (old_client, "token-1"),
+        (new_client, "token-2"),
+    ]
+
+    await pesu.prefetch_client_with_csrf_token()
+    await pesu.prefetch_client_with_csrf_token()
+
+    old_client.aclose.assert_awaited_once()
