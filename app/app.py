@@ -6,8 +6,8 @@ import datetime
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from zoneinfo import ZoneInfo
 
-import pytz
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -20,7 +20,7 @@ from app.exceptions.base import PESUAcademyError
 from app.models import RequestModel, ResponseModel
 from app.pesu import PESUAcademy
 
-IST = pytz.timezone("Asia/Kolkata")
+IST = ZoneInfo("Asia/Kolkata")
 CSRF_TOKEN_REFRESH_INTERVAL_SECONDS = 45 * 60
 CSRF_TOKEN_REFRESH_LOCK = asyncio.Lock()
 

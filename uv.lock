@@ -706,7 +706,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
-    { name = "pytz" },
     { name = "selectolax" },
     { name = "uvicorn" },
 ]
@@ -743,7 +742,6 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.2.1" },
     { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.1.0" },
-    { name = "pytz", specifier = ">=2025.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.2" },
     { name = "seaborn", marker = "extra == 'dev'", specifier = ">=0.13.2" },
     { name = "selectolax", specifier = ">=0.3.30" },

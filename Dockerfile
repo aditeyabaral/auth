@@ -1,9 +1,13 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-bookworm
 
-COPY app /app
-COPY README.md /README.md
-COPY requirements.txt /requirements.txt
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-RUN pip install -r requirements.txt
+WORKDIR /app
 
-CMD ["python", "-m", "app.app"]
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY app ./app
+COPY README.md ./
+
+CMD ["uv", "run", "python", "-m", "app.app"]
