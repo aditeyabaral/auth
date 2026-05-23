@@ -16,7 +16,7 @@ dependencies = [
     "selectolax>=0.4.9",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "matplotlib>=3.10.9",
     "mdformat>=1.0.0",
