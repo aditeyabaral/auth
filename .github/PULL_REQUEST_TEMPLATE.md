@@ -88,8 +88,8 @@ Please provide a concise summary of the changes:
 
 ### 📊 Benchmarks & Analysis
 
-- [ ] `scripts/benchmark_auth.py` – Performance or latency measurement changes
-- [ ] `scripts/analyze_benchmark.py` – Benchmark result analysis changes
+- [ ] `scripts/benchmark/benchmark_requests.py` – Performance or latency measurement changes
+- [ ] `scripts/benchmark/analyze_benchmark.py` – Benchmark result analysis changes
 - [ ] `scripts/run_tests.py` – Custom test runner logic or behavior updates
 
 ## 📸 Screenshots / API Demos (if applicable)
