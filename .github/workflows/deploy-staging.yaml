@@ -59,6 +59,8 @@ jobs:
               content = f.read()
 
           match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"', content, re.MULTILINE)
+          if not match:
+              raise SystemExit('version = "x.y.z" not found in pyproject.toml')
           major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
           new_version = f"{major}.{minor}.{patch + 1}"
 
@@ -76,13 +78,6 @@ jobs:
           print(f"Bumped: {major}.{minor}.{patch} -> {new_version}")
           EOF
 
-      - name: Commit and push
-        run: |
-          git add pyproject.toml
-          git diff --cached --quiet && exit 0
-          git commit -m "chore: bump patch version [skip ci]"
-          git push origin HEAD:dev
-
       - name: Deploy to Staging Environment
         run: |
           echo "🚀 Deploying to Staging..."
@@ -91,3 +86,10 @@ jobs:
             exit 1
           }
           echo "✅ Staging deployment completed successfully!"
+
+      - name: Commit and push
+        run: |
+          git add pyproject.toml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: bump patch version [skip ci]"
+          git push origin HEAD:dev
