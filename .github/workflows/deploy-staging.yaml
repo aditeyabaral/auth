@@ -78,6 +78,13 @@ jobs:
           print(f"Bumped: {major}.{minor}.{patch} -> {new_version}")
           EOF
 
+      - name: Commit and push
+        run: |
+          git add pyproject.toml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: bump patch version [skip ci]"
+          git push origin HEAD:dev
+
       - name: Deploy to Staging Environment
         run: |
           echo "🚀 Deploying to Staging..."
@@ -86,10 +93,3 @@ jobs:
             exit 1
           }
           echo "✅ Staging deployment completed successfully!"
-
-      - name: Commit and push
-        run: |
-          git add pyproject.toml
-          git diff --cached --quiet && exit 0
-          git commit -m "chore: bump patch version [skip ci]"
-          git push origin HEAD:dev
