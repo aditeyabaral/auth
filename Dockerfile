@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
 
 WORKDIR /pesu-auth
 
@@ -10,7 +10,7 @@ RUN uv sync --no-dev --frozen --no-install-project
 COPY app ./app
 RUN uv sync --no-dev --frozen
 
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 WORKDIR /pesu-auth
 
