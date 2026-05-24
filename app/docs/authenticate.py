@@ -85,7 +85,7 @@ authenticate_docs = ApiDocs(
                             },
                         },
                         "authentication_with_kycas": {
-                            "summary": 'Authentication with "Know Your Class and Section endpoint"',
+                            "summary": 'Authentication with "Know Your Class and Section" data"',
                             "value": {
                                 "status": True,
                                 "message": "Login successful.",
