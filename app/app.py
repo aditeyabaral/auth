@@ -1,19 +1,26 @@
 """FastAPI Entrypoint for PESUAuth API."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import datetime
 import logging
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from fastapi.requests import Request
+
 from pydantic import ValidationError
 
 from app.docs import authenticate_docs, health_docs, readme_docs
