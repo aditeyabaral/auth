@@ -8,6 +8,8 @@ jobs:
   sync-dev-to-main:
     runs-on: ubuntu-latest
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,7 +35,6 @@ jobs:
           git merge --ff-only origin/dev || {
             echo "❌ Fast-forward merge failed. Manual conflict resolution required."
             echo "Please ensure dev branch is ahead of main with no conflicts."
-            git merge --abort
             exit 1
           }
 
@@ -116,7 +117,11 @@ jobs:
       - name: Fast-forward dev to main
         run: |
           git fetch origin main
-          git merge --ff-only origin/main
+          git merge --ff-only origin/main || {
+            echo "❌ Fast-forward merge of main into dev failed. dev has diverged from main."
+            echo "Please manually fast-forward dev to main before retrying the production deployment."
+            exit 1
+          }
           git push origin dev
 
   # Build and push Docker images

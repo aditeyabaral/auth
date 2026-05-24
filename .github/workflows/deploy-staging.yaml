@@ -14,7 +14,7 @@ jobs:
   # Deploy to staging environment
   deploy-staging:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev' && !startsWith(github.event.workflow_run.head_commit.message, 'chore: bump') }}
     permissions:
       contents: write
     env:
@@ -27,11 +27,11 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout dev
+      - name: Checkout validated commit
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ref: dev
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Configure Git
@@ -39,8 +39,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Pull latest dev
-        run: git pull --rebase origin dev
+      - name: Verify dev HEAD matches validated SHA
+        run: |
+          git fetch origin dev
+          DEV_HEAD=$(git rev-parse origin/dev)
+          VALIDATED_SHA="${{ github.event.workflow_run.head_sha }}"
+          if [ "$DEV_HEAD" != "$VALIDATED_SHA" ]; then
+            echo "❌ dev has advanced to $DEV_HEAD beyond the validated SHA $VALIDATED_SHA."
+            echo "Skipping deployment to avoid deploying unvalidated commits."
+            exit 1
+          fi
 
       - name: Bump patch version
         run: |
@@ -73,7 +81,7 @@ jobs:
           git add pyproject.toml
           git diff --cached --quiet && exit 0
           git commit -m "chore: bump patch version [skip ci]"
-          git push origin dev
+          git push origin HEAD:dev
 
       - name: Deploy to Staging Environment
         run: |
