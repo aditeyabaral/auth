@@ -14,7 +14,7 @@ jobs:
   # Deploy to staging environment
   deploy-staging:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev' && !startsWith(github.event.workflow_run.head_commit.message, 'chore: bump') }}
+    if: "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev' && !startsWith(github.event.workflow_run.head_commit.message, 'chore: bump') }}"
     permissions:
       contents: write
     env:
