@@ -1,18 +1,26 @@
 """FastAPI Entrypoint for PESUAuth API."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import datetime
 import logging
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.metadata import version
+from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
-import pytz
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from fastapi.requests import Request
+
 from pydantic import ValidationError
 
 from app.docs import authenticate_docs, health_docs, readme_docs
@@ -20,7 +28,7 @@ from app.exceptions.base import PESUAcademyError
 from app.models import RequestModel, ResponseModel
 from app.pesu import PESUAcademy
 
-IST = pytz.timezone("Asia/Kolkata")
+IST = ZoneInfo("Asia/Kolkata")
 CSRF_TOKEN_REFRESH_INTERVAL_SECONDS = 45 * 60
 CSRF_TOKEN_REFRESH_LOCK = asyncio.Lock()
 
@@ -76,7 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="PESUAuth API",
     description="A simple and lightweight API to authenticate PESU credentials using PESU Academy",
-    version="2.1.0",
+    version=version("pesu-auth"),
     docs_url="/",
     lifespan=lifespan,
     openapi_tags=[
@@ -216,7 +224,7 @@ async def authenticate(payload: RequestModel, background_tasks: BackgroundTasks)
     try:
         authentication_result = ResponseModel.model_validate(authentication_result)
         logging.info(f"Returning auth result for user={username}: {authentication_result}")
-        authentication_result = authentication_result.model_dump(exclude_none=True)
+        authentication_result = authentication_result.model_dump(by_alias=True, exclude_none=True)
         authentication_result["timestamp"] = current_time.isoformat()
         return JSONResponse(
             status_code=200,

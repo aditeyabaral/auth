@@ -74,7 +74,7 @@ projects.
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.12 or higher
 - Git
 - Docker
 
@@ -83,14 +83,14 @@ projects.
 1. **Create and activate a virtual environment:**
 
    ```bash
-   uv venv --python 3.11
+   uv venv --python 3.12
    source .venv/bin/activate
    ```
 
 1. **Install dependencies:**
 
    ```bash
-   uv sync --all-extras
+   uv sync --all-groups
    ```
 
 ### Set Up Environment Variables
@@ -130,9 +130,8 @@ suite automatically before every commit.
 The following checks are enforced:
 
 - ✅ `ruff` for linting and formatting (with auto-fix)
-- ✅ `blacken-docs` to format code blocks inside Markdown files
-- ✅ `pyupgrade` to upgrade syntax to Python 3.9+
-- ✅ `end-of-file-fixer`, `trailing-whitespace`, `check-yaml`, `check-toml`, `requirements-txt-fixer` for formatting
+- ✅ `mdformat` to format Markdown files (with GFM support)
+- ✅ `end-of-file-fixer`, `trailing-whitespace`, `check-yaml`, `check-toml`, `requirements-txt-fixer`, `check-added-large-files` for formatting
 - ✅ `name-tests-test` to enforce test naming conventions
 - ✅ `debug-statements` to prevent committed `print()` or `pdb`
 - ✅ A local `pytest` hook that runs the full test suite
@@ -259,7 +258,7 @@ To keep the codebase clean and maintainable, please follow these conventions:
 - Write clean, readable code
 - Use meaningful variable and function names
 - Avoid large functions; keep logic modular and composable
-- Use Python 3.11+ syntax when appropriate (e.g., `match`, `|` union types)
+- Use Python 3.12+ syntax when appropriate (e.g., `match`, `|` union types)
 - Keep imports sorted and remove unused ones (handled automatically via `ruff`)
 
 ### 📝 Docstrings & Comments

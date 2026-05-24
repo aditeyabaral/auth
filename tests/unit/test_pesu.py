@@ -299,7 +299,7 @@ async def test_get_profile_information_unknown_campus_code(
 @patch("app.pesu.httpx.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_campus_code_rr_ec(mock_get, mock_html_parser, pesu):
-    """Test that PRNs with PES1 and PES2 set the correct campus and campus_code."""
+    """Test that PRNs with PES1 and PES2 set the correct campus and campusCode."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.text = "<html></html>"
@@ -344,7 +344,7 @@ async def test_get_profile_information_campus_code_rr_ec(mock_get, mock_html_par
     client.get.return_value = mock_response
 
     profile_rr = await pesu.get_profile_information(client, "testuser")
-    assert profile_rr["campus_code"] == 1
+    assert profile_rr["campusCode"] == 1
     assert profile_rr["campus"] == "RR"
 
     # Subcase 2: PES2... (EC campus)
@@ -366,7 +366,7 @@ async def test_get_profile_information_campus_code_rr_ec(mock_get, mock_html_par
     mock_html_parser.return_value = mock_soup_ec
 
     profile_ec = await pesu.get_profile_information(client, "testuser")
-    assert profile_ec["campus_code"] == 2
+    assert profile_ec["campusCode"] == 2
     assert profile_ec["campus"] == "EC"
 
 
@@ -488,7 +488,7 @@ def test_default_fields_is_list():
     assert "section" in PESUAcademy.DEFAULT_FIELDS
     assert "email" in PESUAcademy.DEFAULT_FIELDS
     assert "phone" in PESUAcademy.DEFAULT_FIELDS
-    assert "campus_code" in PESUAcademy.DEFAULT_FIELDS
+    assert "campusCode" in PESUAcademy.DEFAULT_FIELDS
     assert "campus" in PESUAcademy.DEFAULT_FIELDS
 
 @pytest.mark.asyncio
@@ -696,7 +696,7 @@ async def test_get_kycas_success(pesu):
     assert result["cycle"] == "NA"
     assert result["department"] == "CSE(EC Campus)"
     assert result["branch"] == "CSE"
-    assert result["institute_name"] == "PES University (Electronic City)"
+    assert result["instituteName"] == "PES University (Electronic City)"
 
 
 @patch("app.pesu.httpx.AsyncClient.get")
@@ -722,13 +722,13 @@ async def test_authenticate_passes_kycas_flag(mock_get_kycas, mock_post, mock_ge
         "cycle": "NA",
         "department": "CSE(RR Campus)",
         "branch": "CSE",
-        "institute_name": "PES University",
+        "instituteName": "PES University",
     }
 
     result = await pesu.authenticate("testuser", "testpass", profile=False, know_your_class_and_section=True)
 
     assert result["status"] is True
-    assert result["know_your_class_and_section"]["semester"] == "Sem-6"
+    assert result["knowYourClassAndSection"]["semester"] == "Sem-6"
     mock_get_kycas.assert_called_once()
 
 
@@ -747,7 +747,7 @@ async def test_authenticate_success_no_kycas(mock_post, mock_get, pesu):
 
     result = await pesu.authenticate("user", "pass", know_your_class_and_section=False)
     assert result["status"] is True
-    assert "know_your_class_and_section" not in result
+    assert "knowYourClassAndSection" not in result
 
 
 @patch("app.pesu.httpx.AsyncClient.get")
@@ -773,15 +773,15 @@ async def test_authenticate_with_kycas(mock_get_kycas, mock_post, mock_get, pesu
         "cycle": "NA",
         "department": "CSE(RR Campus)",
         "branch": "CSE",
-        "institute_name": "PES University",
+        "instituteName": "PES University",
     }
 
     result = await pesu.authenticate("user", "pass", know_your_class_and_section=True)
 
     assert result["status"] is True
-    assert "know_your_class_and_section" in result
-    assert result["know_your_class_and_section"]["prn"] == "PES1201800001"
-    assert result["know_your_class_and_section"]["institute_name"] == "PES University"
+    assert "knowYourClassAndSection" in result
+    assert result["knowYourClassAndSection"]["prn"] == "PES1201800001"
+    assert result["knowYourClassAndSection"]["instituteName"] == "PES University"
 
 
 @patch("app.pesu.httpx.AsyncClient.get")
@@ -807,7 +807,7 @@ async def test_authenticate_with_kycas_field_filtering(mock_get_kycas, mock_post
         "cycle": "NA",
         "department": "CSE(RR Campus)",
         "branch": "CSE",
-        "institute_name": "PES University",
+        "instituteName": "PES University",
     }
 
     result = await pesu.authenticate(
@@ -818,12 +818,12 @@ async def test_authenticate_with_kycas_field_filtering(mock_get_kycas, mock_post
     )
 
     assert result["status"] is True
-    kycas = result["know_your_class_and_section"]
+    kycas = result["knowYourClassAndSection"]
     assert "name" in kycas
     assert "semester" in kycas
     assert "prn" not in kycas
     assert "branch" not in kycas
-    assert "institute_name" not in kycas
+    assert "instituteName" not in kycas
 
 
 @patch("app.pesu.httpx.AsyncClient.get")
@@ -860,9 +860,9 @@ async def test_authenticate_with_both_profile_and_kycas(
 
     assert result["status"] is True
     assert "profile" in result
-    assert "know_your_class_and_section" in result
+    assert "knowYourClassAndSection" in result
     assert result["profile"]["name"] == "John Doe"
-    assert result["know_your_class_and_section"]["semester"] == "Sem-6"
+    assert result["knowYourClassAndSection"]["semester"] == "Sem-6"
 
 def test_kycas_header_to_key_map_is_dict():
     """Test that the "Know Your Class and Section" header map has expected keys."""
@@ -886,4 +886,20 @@ def test_default_fields_includes_kycas_relevant_fields():
     assert "semester" in fields
     assert "cycle" in fields
     assert "department" in fields
-    assert "institute_name" in fields
+    assert "instituteName" in fields
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_prefetch_client_closes_old_client_on_second_call(mock_fetch, pesu):
+    old_client = AsyncMock()
+    new_client = AsyncMock()
+    mock_fetch.side_effect = [
+        (old_client, "token-1"),
+        (new_client, "token-2"),
+    ]
+
+    await pesu.prefetch_client_with_csrf_token()
+    await pesu.prefetch_client_with_csrf_token()
+
+    old_client.aclose.assert_awaited_once()

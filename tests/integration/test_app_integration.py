@@ -155,7 +155,7 @@ def test_integration_authenticate_with_all_profile_fields(client):
         "section",
         "email",
         "phone",
-        "campus_code",
+        "campusCode",
         "campus",
     ]
 
@@ -184,7 +184,7 @@ def test_integration_authenticate_with_all_profile_fields(client):
     assert profile["section"] == section
     assert profile["email"] == email
     assert profile["phone"] == phone
-    assert profile["campus_code"] == campus_code
+    assert profile["campusCode"] == campus_code
     assert profile["campus"] == campus
 
 
@@ -357,11 +357,11 @@ def test_unhandled_exception_handler(client):
 
 
 def test_integration_authenticate_kycas_wrong_type(client):
-    """Test that non-boolean know_your_class_and_section is rejected."""
+    """Test that non-boolean knowYourClassAndSection is rejected."""
     payload = {
         "username": "username",
         "password": "password",
-        "know_your_class_and_section": "true",
+        "knowYourClassAndSection": "true",
     }
 
     response = client.post("/authenticate", json=payload)
@@ -369,7 +369,7 @@ def test_integration_authenticate_kycas_wrong_type(client):
     data = response.json()
     assert data["status"] is False
     assert "Could not validate request data" in data["message"]
-    assert "body.know_your_class_and_section: Input should be a valid boolean" in data["message"]
+    assert "body.knowYourClassAndSection: Input should be a valid boolean" in data["message"]
 
 @pytest.mark.secret_required
 def test_integration_authenticate_with_kycas(client):
@@ -382,7 +382,7 @@ def test_integration_authenticate_with_kycas(client):
     payload = {
         "username": email,
         "password": password,
-        "know_your_class_and_section": True,
+        "knowYourClassAndSection": True,
     }
 
     response = client.post("/authenticate", json=payload)
@@ -390,8 +390,8 @@ def test_integration_authenticate_with_kycas(client):
     data = response.json()
     assert data["status"] is True
     assert data["message"] == "Login successful."
-    assert "know_your_class_and_section" in data
-    kycas = data["know_your_class_and_section"]
+    assert "knowYourClassAndSection" in data
+    kycas = data["knowYourClassAndSection"]
     assert "prn" in kycas or "srn" in kycas or "name" in kycas
 
 
@@ -407,7 +407,7 @@ def test_integration_authenticate_with_profile_and_kycas(client):
         "username": email,
         "password": password,
         "profile": True,
-        "know_your_class_and_section": True,
+        "knowYourClassAndSection": True,
     }
 
     response = client.post("/authenticate", json=payload)
@@ -415,7 +415,7 @@ def test_integration_authenticate_with_profile_and_kycas(client):
     data = response.json()
     assert data["status"] is True
     assert "profile" in data
-    assert "know_your_class_and_section" in data
+    assert "knowYourClassAndSection" in data
 
 
 @pytest.mark.secret_required
@@ -429,11 +429,77 @@ def test_integration_authenticate_kycas_without_requesting(client):
     payload = {
         "username": email,
         "password": password,
-        "know_your_class_and_section": False,
+        "knowYourClassAndSection": False,
     }
 
     response = client.post("/authenticate", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["status"] is True
-    assert data.get("know_your_class_and_section") is None
+    assert data.get("knowYourClassAndSection") is None
+
+
+def test_integration_authenticate_deprecated_know_your_class_and_section_key_rejected(client):
+    """Test that the old snake_case know_your_class_and_section key is rejected with 400."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "know_your_class_and_section": True,
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.know_your_class_and_section: Extra inputs are not permitted" in data["message"]
+
+
+def test_integration_authenticate_unknown_extra_key_rejected(client):
+    """Test that any unknown key in the request body is rejected with 400."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "someUnknownField": "value",
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.someUnknownField: Extra inputs are not permitted" in data["message"]
+
+
+def test_integration_authenticate_deprecated_campus_code_in_fields_rejected(client):
+    """Test that the old snake_case campus_code is rejected as a fields value."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "profile": True,
+        "fields": ["campus_code"],
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.fields.0" in data["message"]
+
+
+def test_integration_authenticate_deprecated_institute_name_in_fields_rejected(client):
+    """Test that the old snake_case institute_name is rejected as a fields value."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "profile": True,
+        "fields": ["institute_name"],
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.fields.0" in data["message"]
