@@ -1,11 +1,9 @@
 """Model representing the student's authentication request."""
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
-from app.pesu import PESUAcademy
+from app.pesu import ProfileField
 
 
 class RequestModel(BaseModel):
@@ -44,7 +42,7 @@ class RequestModel(BaseModel):
         json_schema_extra={"example": True},
     )
 
-    fields: list[Literal[*PESUAcademy.DEFAULT_FIELDS]] | None = Field(
+    fields: list[ProfileField] | None = Field(
         None,
         title="Profile Fields",
         description="List of profile fields to fetch. If omitted, all default fields will be returned.",

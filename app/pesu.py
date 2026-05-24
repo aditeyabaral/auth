@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, get_args
 
 import httpx
 from selectolax.parser import HTMLParser, Node
@@ -16,6 +16,23 @@ from app.exceptions.authentication import (
     ProfileFetchError,
     ProfileParseError,
 )
+
+ProfileField = Literal[
+    "name",
+    "prn",
+    "srn",
+    "program",
+    "branch",
+    "semester",
+    "section",
+    "email",
+    "phone",
+    "campusCode",
+    "campus",
+    "cycle",
+    "department",
+    "instituteName",
+]
 
 
 class PESUAcademy:
@@ -35,22 +52,7 @@ class PESUAcademy:
         authenticate: Authenticate the user with the provided username and password.
     """
 
-    DEFAULT_FIELDS: list[str] = [
-        "name",
-        "prn",
-        "srn",
-        "program",
-        "branch",
-        "semester",
-        "section",
-        "email",
-        "phone",
-        "campusCode",
-        "campus",
-        "cycle",
-        "department",
-        "instituteName",
-    ]
+    DEFAULT_FIELDS: list[str] = list(get_args(ProfileField))
 
     PROFILE_PAGE_HEADER_TO_KEY_MAP = {
         "Name": "name",
