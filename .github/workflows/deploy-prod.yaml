@@ -62,32 +62,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump minor version
-        run: |
-          python3 - <<'EOF'
-          import re
-
-          with open("pyproject.toml") as f:
-              content = f.read()
-
-          match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"', content, re.MULTILINE)
-          if not match:
-              raise SystemExit('version = "x.y.z" not found in pyproject.toml')
-          major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
-          new_version = f"{major}.{minor + 1}.0"
-
-          new_content = re.sub(
-              r'^version = "\d+\.\d+\.\d+"',
-              f'version = "{new_version}"',
-              content,
-              count=1,
-              flags=re.MULTILINE,
-          )
-
-          with open("pyproject.toml", "w") as f:
-              f.write(new_content)
-
-          print(f"Bumped: {major}.{minor}.{patch} -> {new_version}")
-          EOF
+        run: python3 scripts/bump_version.py minor
 
       - name: Commit and push
         run: |
