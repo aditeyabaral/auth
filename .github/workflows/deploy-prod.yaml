@@ -183,7 +183,7 @@ jobs:
   # Deploy to Staging
   deploy-to-staging:
     runs-on: ubuntu-latest
-    needs: [bump-minor-version, push-to-dockerhub, push-to-ghcr]
+    needs: [bump-minor-version, push-to-dockerhub, push-to-ghcr, sync-minor-to-dev]
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
     env:
       RENDER_DEPLOY_HOOK_URL_DEV: ${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }}
