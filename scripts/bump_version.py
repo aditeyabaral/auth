@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Bump the project version in pyproject.toml. Usage: bump_version.py [patch|minor]."""
+
 import re
 import sys
 

@@ -50,11 +50,14 @@ jobs:
           fi
 
       - name: Bump patch version
-        run: python3 scripts/bump_version.py patch
+        run: |
+          pip install uv
+          python3 scripts/bump_version.py patch
+          uv lock
 
       - name: Commit and push
         run: |
-          git add pyproject.toml
+          git add pyproject.toml uv.lock
           git diff --cached --quiet && exit 0
           git commit -m "chore: bump patch version [skip ci]"
           git push origin HEAD:dev
