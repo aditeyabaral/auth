@@ -178,10 +178,9 @@ The test account allows **one active session**, so never run the live tests whil
 flight -- including CI. A second login is rejected and shows up as a puzzling `401`.
 
 In CI, pull requests come from forks, and GitHub withholds secrets from fork pull requests. So
-*Pre-Commit Checks* always runs the reduced suite on a pull request, and the live tests run in a
-separate **Live Tests** workflow that a maintainer has to approve first. Until they approve it, the
-job sits pending -- that is expected, not a failure, and it is deliberate: approving means running
-your branch's code with the test account's credentials. Every new push needs approval again.
+*Pre-Commit Checks* runs the reduced suite on every pull request -- it says so in the run's summary
+-- and the live tests only run once the change reaches `dev`. Run them locally before you open a
+pull request; CI will not cover them for you.
 
 ### Writing Tests
 
