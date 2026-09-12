@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal, get_args
 
-import httpx
+import httpx2
 from selectolax.parser import HTMLParser, Node
 
 from app.exceptions.authentication import (
@@ -37,14 +37,14 @@ ProfileField = Literal[
 _CLOSE_TASKS: set[asyncio.Task[None]] = set()
 
 
-async def _aclose_client(client: httpx.AsyncClient) -> None:
+async def _aclose_client(client: httpx2.AsyncClient) -> None:
     """Close an HTTP client, logging rather than raising if the close itself fails.
 
     Cleanup failure must never replace the error that triggered the cleanup: letting `aclose()`
     propagate out of a `finally` would turn a routine 401 into a 500.
 
     Args:
-        client (httpx.AsyncClient): The client to close.
+        client (httpx2.AsyncClient): The client to close.
     """
     try:
         await client.aclose()
@@ -52,7 +52,7 @@ async def _aclose_client(client: httpx.AsyncClient) -> None:
         logging.warning("Failed to close an HTTP client cleanly.", exc_info=True)
 
 
-async def _close_client_quietly(client: httpx.AsyncClient) -> None:
+async def _close_client_quietly(client: httpx2.AsyncClient) -> None:
     """Close an HTTP client, surviving both a failing close and a cancellation mid-close.
 
     Most callers run this from an `except BaseException` handler or a `finally`, which is exactly
@@ -63,7 +63,7 @@ async def _close_client_quietly(client: httpx.AsyncClient) -> None:
     `CancelledError` still propagates to the caller, so cancellation semantics are unchanged.
 
     Args:
-        client (httpx.AsyncClient): The client to close.
+        client (httpx2.AsyncClient): The client to close.
     """
     task = asyncio.ensure_future(_aclose_client(client))
     _CLOSE_TASKS.add(task)
@@ -103,18 +103,18 @@ class PESUAcademy:
     def __init__(self) -> None:
         """Initialize the PESUAcademy class."""
         self._csrf_token: str | None = None
-        self._client: httpx.AsyncClient | None = None
+        self._client: httpx2.AsyncClient | None = None
         self._csrf_lock = asyncio.Lock()
         # Strong references to in-flight prefetch tasks, so they cannot be garbage collected
         # mid-flight. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
         self._prefetch_tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
-    async def _fetch_new_client_with_csrf_token() -> tuple[httpx.AsyncClient, str]:
+    async def _fetch_new_client_with_csrf_token() -> tuple[httpx2.AsyncClient, str]:
         """Initialize a fresh client with an unauthenticated CSRF token from PESU Academy."""
         logging.info("Fetching a new client with an unauthenticated CSRF token...")
         # Create a new client
-        client = httpx.AsyncClient(follow_redirects=True, timeout=10.0)
+        client = httpx2.AsyncClient(follow_redirects=True, timeout=10.0)
         # On success the client is handed to the caller, so only close it if we fail to return it
         try:
             # Fetch the CSRF token
@@ -154,7 +154,7 @@ class PESUAcademy:
             raise
         logging.info("Cache refreshed with new unauthenticated CSRF token.")
 
-    async def _get_client_with_csrf_token(self) -> tuple[httpx.AsyncClient, str]:
+    async def _get_client_with_csrf_token(self) -> tuple[httpx2.AsyncClient, str]:
         """Get the client with the cached CSRF token.
 
         This method is used to get the client with the cached CSRF token.
@@ -266,13 +266,13 @@ class PESUAcademy:
 
     async def get_profile_information(
         self,
-        client: httpx.AsyncClient,
+        client: httpx2.AsyncClient,
         username: str,
     ) -> dict[str, Any]:
         """Get the profile information of the user.
 
         Args:
-            client (httpx.AsyncClient): The HTTP client to use for making requests.
+            client (httpx2.AsyncClient): The HTTP client to use for making requests.
             username (str): The username of the user, usually their PRN/email/phone number.
 
         Returns:

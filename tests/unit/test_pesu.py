@@ -17,7 +17,7 @@ def pesu():
     return PESUAcademy()
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_http_error(mock_get, pesu):
     mock_get.side_effect = Exception("HTTP request failed")
@@ -27,7 +27,7 @@ async def test_get_profile_information_http_error(mock_get, pesu):
         assert "Unable to fetch profile data" in result["error"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_non_200_status(mock_get, pesu):
     mock_response = AsyncMock()
@@ -39,7 +39,7 @@ async def test_get_profile_information_non_200_status(mock_get, pesu):
         assert "Unable to fetch profile data" in result["error"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_authenticate_csrf_token_not_found(mock_get, pesu):
     mock_response = AsyncMock()
@@ -51,8 +51,8 @@ async def test_authenticate_csrf_token_not_found(mock_get, pesu):
         assert "Unable to fetch csrf token" in result["message"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @pytest.mark.asyncio
 async def test_authenticate_post_request_failure(mock_post, mock_get, pesu):
     mock_get_response = AsyncMock()
@@ -65,8 +65,8 @@ async def test_authenticate_post_request_failure(mock_post, mock_get, pesu):
         assert "Unable to authenticate" in result["message"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @pytest.mark.asyncio
 async def test_authenticate_csrf_token_missing_after_login(mock_post, mock_get, pesu):
     """Test authenticate when CSRF token is missing after successful login."""
@@ -82,8 +82,8 @@ async def test_authenticate_csrf_token_missing_after_login(mock_post, mock_get, 
         assert result["message"] == "Login successful."
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @patch("app.pesu.PESUAcademy.get_profile_information")
 @pytest.mark.asyncio
 async def test_authenticate_with_profile_field_filtering(
@@ -115,8 +115,8 @@ async def test_authenticate_with_profile_field_filtering(
     assert "campus" not in result["profile"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @patch("app.pesu.PESUAcademy.get_profile_information")
 @pytest.mark.asyncio
 async def test_authenticate_with_profile_no_field_filtering(
@@ -140,7 +140,7 @@ async def test_authenticate_with_profile_no_field_filtering(
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_profile_parse_error(mock_get, mock_html_parser, pesu):
     mock_response = MagicMock()
@@ -160,8 +160,8 @@ async def test_get_profile_information_profile_parse_error(mock_get, mock_html_p
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.post")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_authenticate_login_form_present(mock_get, mock_post, mock_html_parser, pesu):
     mock_get_response = MagicMock()
@@ -184,8 +184,8 @@ async def test_authenticate_login_form_present(mock_get, mock_post, mock_html_pa
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.post")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_authenticate_csrf_token_missing_after_login_strict(
     mock_get,
@@ -215,7 +215,7 @@ async def test_authenticate_csrf_token_missing_after_login_strict(
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_unknown_campus_code(
     mock_get,
@@ -296,7 +296,7 @@ async def test_get_profile_information_unknown_campus_code(
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_campus_code_rr_ec(mock_get, mock_html_parser, pesu):
     """Test that PRNs with PES1 and PES2 set the correct campus and campusCode."""
@@ -371,7 +371,7 @@ async def test_get_profile_information_campus_code_rr_ec(mock_get, mock_html_par
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_get_profile_information_no_profile_data(mock_get, mock_html_parser, pesu):
     """Test that ProfileParseError is raised when no profile data is parsed (parsing loop runs but nothing added)."""
@@ -394,7 +394,7 @@ async def test_get_profile_information_no_profile_data(mock_get, mock_html_parse
 
 
 @patch("app.pesu.HTMLParser")
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @patch("app.pesu.PESUAcademy._extract_and_update_profile", new_callable=MagicMock)
 @pytest.mark.asyncio
 async def test_get_profile_information_empty_profile_triggers_final_parse_error(
@@ -574,7 +574,7 @@ async def test_authenticate_closes_client_on_success(mock_get_client, pesu):
 
 
 @pytest.mark.asyncio
-@patch("app.pesu.httpx.AsyncClient")
+@patch("app.pesu.httpx2.AsyncClient")
 async def test_fetch_new_client_closes_client_when_csrf_token_missing(mock_client_class, pesu):
     """A client that never gets returned to the caller must not be leaked."""
     client = AsyncMock()
@@ -590,7 +590,7 @@ async def test_fetch_new_client_closes_client_when_csrf_token_missing(mock_clien
 
 
 @pytest.mark.asyncio
-@patch("app.pesu.httpx.AsyncClient")
+@patch("app.pesu.httpx2.AsyncClient")
 async def test_fetch_new_client_closes_client_when_get_fails(mock_client_class, pesu):
     """A client whose initial GET fails must not be leaked."""
     client = AsyncMock()

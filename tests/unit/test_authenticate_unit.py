@@ -11,8 +11,8 @@ def pesu():
     return PESUAcademy()
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @pytest.mark.asyncio
 async def test_authenticate_success_no_profile(mock_post, mock_get, pesu):
     # Mock GET home page response with csrf token meta
@@ -33,8 +33,8 @@ async def test_authenticate_success_no_profile(mock_post, mock_get, pesu):
     assert "profile" not in result
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @patch("app.pesu.PESUAcademy.get_profile_information")
 @pytest.mark.asyncio
 async def test_authenticate_success_with_profile(mock_get_profile, mock_post, mock_get, pesu):
@@ -62,7 +62,7 @@ async def test_authenticate_success_with_profile(mock_get_profile, mock_post, mo
     assert "branch" not in result["profile"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.get")
 @pytest.mark.asyncio
 async def test_authenticate_csrf_fetch_failure(mock_get, pesu):
     mock_get.side_effect = CSRFTokenError("CSRF fetch failed")
@@ -73,8 +73,8 @@ async def test_authenticate_csrf_fetch_failure(mock_get, pesu):
         assert "Unable to fetch csrf token" in result["message"]
 
 
-@patch("app.pesu.httpx.AsyncClient.get")
-@patch("app.pesu.httpx.AsyncClient.post")
+@patch("app.pesu.httpx2.AsyncClient.get")
+@patch("app.pesu.httpx2.AsyncClient.post")
 @pytest.mark.asyncio
 async def test_authenticate_login_failure(mock_post, mock_get, pesu):
     mock_get_response = AsyncMock()
