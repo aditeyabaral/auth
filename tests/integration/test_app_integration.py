@@ -356,89 +356,6 @@ def test_unhandled_exception_handler(client):
     assert data["message"] == "Internal Server Error. Please try again later."
 
 
-def test_integration_authenticate_kycas_wrong_type(client):
-    """Test that non-boolean knowYourClassAndSection is rejected."""
-    payload = {
-        "username": "username",
-        "password": "password",
-        "knowYourClassAndSection": "true",
-    }
-
-    response = client.post("/authenticate", json=payload)
-    assert response.status_code == 400
-    data = response.json()
-    assert data["status"] is False
-    assert "Could not validate request data" in data["message"]
-    assert "body.knowYourClassAndSection: Input should be a valid boolean" in data["message"]
-
-@pytest.mark.secret_required
-def test_integration_authenticate_with_kycas(client):
-    """Test successful authentication with "Know Your Class and Section" data."""
-    email = os.getenv("TEST_EMAIL")
-    password = os.getenv("TEST_PASSWORD")
-    assert email is not None, "TEST_EMAIL environment variable not set"
-    assert password is not None, "TEST_PASSWORD environment variable not set"
-
-    payload = {
-        "username": email,
-        "password": password,
-        "knowYourClassAndSection": True,
-    }
-
-    response = client.post("/authenticate", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] is True
-    assert data["message"] == "Login successful."
-    assert "knowYourClassAndSection" in data
-    kycas = data["knowYourClassAndSection"]
-    assert "prn" in kycas or "srn" in kycas or "name" in kycas
-
-
-@pytest.mark.secret_required
-def test_integration_authenticate_with_profile_and_kycas(client):
-    """Test successful authentication requesting both profile and "Know Your Class and Section"."""
-    email = os.getenv("TEST_EMAIL")
-    password = os.getenv("TEST_PASSWORD")
-    assert email is not None, "TEST_EMAIL environment variable not set"
-    assert password is not None, "TEST_PASSWORD environment variable not set"
-
-    payload = {
-        "username": email,
-        "password": password,
-        "profile": True,
-        "knowYourClassAndSection": True,
-    }
-
-    response = client.post("/authenticate", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] is True
-    assert "profile" in data
-    assert "knowYourClassAndSection" in data
-
-
-@pytest.mark.secret_required
-def test_integration_authenticate_kycas_without_requesting(client):
-    """Test that "Know Your Class and Section" data is NOT returned when know_your_class_and_section is False."""
-    email = os.getenv("TEST_EMAIL")
-    password = os.getenv("TEST_PASSWORD")
-    assert email is not None, "TEST_EMAIL environment variable not set"
-    assert password is not None, "TEST_PASSWORD environment variable not set"
-
-    payload = {
-        "username": email,
-        "password": password,
-        "knowYourClassAndSection": False,
-    }
-
-    response = client.post("/authenticate", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] is True
-    assert data.get("knowYourClassAndSection") is None
-
-
 def test_integration_authenticate_deprecated_know_your_class_and_section_key_rejected(client):
     """Test that the old snake_case know_your_class_and_section key is rejected with 400."""
     payload = {
@@ -453,6 +370,23 @@ def test_integration_authenticate_deprecated_know_your_class_and_section_key_rej
     assert data["status"] is False
     assert "Could not validate request data" in data["message"]
     assert "body.know_your_class_and_section: Extra inputs are not permitted" in data["message"]
+
+
+def test_integration_authenticate_deprecated_know_your_class_and_section_camel_key_rejected(client):
+    """Test that the deprecated knowYourClassAndSection key is rejected with 400."""
+    payload = {
+        "username": "username",
+        "password": "password",
+        "profile": True,
+        "knowYourClassAndSection": True,
+    }
+
+    response = client.post("/authenticate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["status"] is False
+    assert "Could not validate request data" in data["message"]
+    assert "body.knowYourClassAndSection: Extra inputs are not permitted" in data["message"]
 
 
 def test_integration_authenticate_unknown_extra_key_rejected(client):
@@ -503,3 +437,21 @@ def test_integration_authenticate_deprecated_institute_name_in_fields_rejected(c
     assert data["status"] is False
     assert "Could not validate request data" in data["message"]
     assert "body.fields.0" in data["message"]
+
+
+def test_integration_authenticate_removed_kycas_fields_rejected(client):
+    """Test that the removed "Know Your Class and Section" field names are rejected with 400."""
+    for field in ("cycle", "department", "instituteName"):
+        payload = {
+            "username": "username",
+            "password": "password",
+            "profile": True,
+            "fields": [field],
+        }
+
+        response = client.post("/authenticate", json=payload)
+        assert response.status_code == 400
+        data = response.json()
+        assert data["status"] is False
+        assert "Could not validate request data" in data["message"]
+        assert "body.fields.0" in data["message"]

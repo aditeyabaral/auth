@@ -13,7 +13,6 @@ def make_request(
     host: str = "http://localhost:5000",
     route: str = "authenticate",
     profile: bool = True,
-    know_your_class_and_section: bool = False,
     timeout: float = 10.0,
 ) -> tuple[dict, float]:
     """Make a request to the authentication endpoint and return the response and elapsed time.
@@ -22,7 +21,6 @@ def make_request(
         host: The host to make the request to
         route: The route to make the request to
         profile: Whether to fetch the profile information or not
-        know_your_class_and_section: Whether to fetch class and section information or not
         timeout: The timeout for the request
 
     Returns:
@@ -34,7 +32,6 @@ def make_request(
                 "username": os.getenv("TEST_PRN"),
                 "password": os.getenv("TEST_PASSWORD"),
                 "profile": profile,
-                "knowYourClassAndSection": know_your_class_and_section,
             }
             start_time = time.time()
             response = client.post(

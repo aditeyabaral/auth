@@ -32,12 +32,6 @@ if __name__ == "__main__":
         "(default: fetch profile info)",
     )
     parser.add_argument(
-        "--know-your-class-and-section",
-        action="store_true",
-        help="Run the authenticate endpoint benchmark with class and section information "
-        "(default: do not fetch class and section info)",
-    )
-    parser.add_argument(
         "--parallel",
         action="store_true",
         help="Run the benchmark in parallel using threads",
@@ -76,7 +70,6 @@ if __name__ == "__main__":
     max_workers = args.max_workers
     num_requests = args.num_requests
     profile = not args.no_profile
-    know_your_class_and_section = args.know_your_class_and_section
     parallel = args.parallel
     host = args.host
     route = args.route
@@ -95,7 +88,6 @@ if __name__ == "__main__":
                 executor.submit(
                     make_request,
                     profile=profile,
-                    know_your_class_and_section=know_your_class_and_section,
                     host=host,
                     route=route,
                     timeout=timeout,
@@ -119,7 +111,6 @@ if __name__ == "__main__":
         for _ in tqdm(range(num_requests), desc="Processing requests"):
             response, elapsed = make_request(
                 profile=profile,
-                know_your_class_and_section=know_your_class_and_section,
                 host=host,
                 route=route,
                 timeout=timeout,

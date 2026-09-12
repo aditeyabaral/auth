@@ -32,16 +32,6 @@ class RequestModel(BaseModel):
         json_schema_extra={"example": True},
     )
 
-    know_your_class_and_section: bool = Field(
-        False,
-        title="Know Your Class and Section Flag",
-        description=(
-            "Whether to fetch the user's class and section information from the "
-            '"Know Your Class and Section" endpoint.'
-        ),
-        json_schema_extra={"example": True},
-    )
-
     fields: list[ProfileField] | None = Field(
         None,
         title="Profile Fields",
