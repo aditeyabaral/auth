@@ -33,7 +33,6 @@ jobs:
           git merge --ff-only origin/dev || {
             echo "❌ Fast-forward merge failed. Manual conflict resolution required."
             echo "Please ensure dev branch is ahead of main with no conflicts."
-            git merge --abort
             exit 1
           }
 
