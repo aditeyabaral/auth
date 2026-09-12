@@ -62,6 +62,29 @@ async def test_csrf_token_refresh_loop_logs_exception_on_failure(mock_refresh, m
     assert "Failed to refresh unauthenticated CSRF token in the background." in caplog.text
 
 
+def test_lifespan_logs_a_refresh_task_that_refuses_to_cancel(caplog):
+    """A background task that fails its own cancellation is reported, not swallowed at shutdown."""
+
+    async def stubborn_loop():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            raise RuntimeError("refresh task refused to cancel")
+
+    with (
+        patch("app.app.pesu_academy.prefetch_client_with_csrf_token", new_callable=AsyncMock),
+        patch("app.app.pesu_academy.close_client", new_callable=AsyncMock) as mock_close,
+        patch("app.app._csrf_token_refresh_loop", stubborn_loop),
+        caplog.at_level("ERROR"),
+    ):
+        with TestClient(app) as test_client:
+            assert test_client.get("/health").status_code == 200
+
+    assert "Failed to cancel unauthenticated CSRF token refresh background task." in caplog.text
+    # Shutdown must carry on past the failure and still close the client
+    mock_close.assert_awaited_once()
+
+
 @patch("app.app.argparse.ArgumentParser.parse_args")
 @patch("app.app.logging.basicConfig")
 @patch("app.app.uvicorn.run")
