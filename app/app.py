@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -30,15 +30,12 @@ from app.pesu import PESUAcademy
 
 IST = ZoneInfo("Asia/Kolkata")
 CSRF_TOKEN_REFRESH_INTERVAL_SECONDS = 45 * 60
-CSRF_TOKEN_REFRESH_LOCK = asyncio.Lock()
 
 
-async def _refresh_csrf_token_with_lock() -> None:
-    """Refresh the CSRF token with a lock."""
-    logging.debug("Refreshing unauthenticated CSRF token...")
-    async with CSRF_TOKEN_REFRESH_LOCK:
-        await pesu_academy.prefetch_client_with_csrf_token()
-        logging.info("Unauthenticated CSRF token refreshed successfully.")
+async def _refresh_csrf_token() -> None:
+    """Refresh the cached unauthenticated CSRF token and client."""
+    await pesu_academy.prefetch_client_with_csrf_token()
+    logging.info("Unauthenticated CSRF token refreshed successfully.")
 
 
 async def _csrf_token_refresh_loop() -> None:
@@ -46,7 +43,7 @@ async def _csrf_token_refresh_loop() -> None:
     while True:
         try:
             logging.debug("Refreshing unauthenticated CSRF token...")
-            await _refresh_csrf_token_with_lock()
+            await _refresh_csrf_token()
         except Exception:
             logging.exception("Failed to refresh unauthenticated CSRF token in the background.")
         await asyncio.sleep(CSRF_TOKEN_REFRESH_INTERVAL_SECONDS)
@@ -188,7 +185,7 @@ async def readme() -> RedirectResponse:
     responses=authenticate_docs.response_examples,
     tags=["Authentication"],
 )
-async def authenticate(payload: RequestModel, background_tasks: BackgroundTasks) -> JSONResponse:
+async def authenticate(payload: RequestModel) -> JSONResponse:
     """Authenticate a user using their PESU credentials via the PESU Academy service.
 
     Request body parameters:
@@ -215,8 +212,6 @@ async def authenticate(payload: RequestModel, background_tasks: BackgroundTasks)
             fields=fields,
         ),
     )
-    # Prefetch a new client with an unauthenticated CSRF token for the next request
-    background_tasks.add_task(_refresh_csrf_token_with_lock)
 
     # Validate the response
     try:

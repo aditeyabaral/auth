@@ -65,6 +65,9 @@ class PESUAcademy:
         self._csrf_token: str | None = None
         self._client: httpx.AsyncClient | None = None
         self._csrf_lock = asyncio.Lock()
+        # Strong references to in-flight prefetch tasks, so they cannot be garbage collected
+        # mid-flight. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+        self._prefetch_tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
     async def _fetch_new_client_with_csrf_token() -> tuple[httpx.AsyncClient, str]:
@@ -131,9 +134,36 @@ class PESUAcademy:
             self._csrf_token = None
 
         # Kick off async prefetch for the *next* request (non-blocking)
-        asyncio.create_task(self._prefetch_client_with_csrf_token())
+        self._spawn_prefetch_task()
         # Return a dedicated client/token for this request
         return client_to_use, token_to_use
+
+    def _on_prefetch_task_done(self, task: asyncio.Task[None]) -> None:
+        """Drop the finished prefetch task's reference and log any failure.
+
+        Retrieving the exception is what keeps a failed prefetch from being reported only as
+        "Task exception was never retrieved" when the task is garbage collected. A failed prefetch
+        is not fatal: the cache stays empty and the next request fetches a client inline instead.
+
+        Args:
+            task (asyncio.Task[None]): The prefetch task that has completed.
+        """
+        self._prefetch_tasks.discard(task)
+        # exception() raises on a cancelled task, so that has to be checked first
+        if task.cancelled():
+            return
+        if (exception := task.exception()) is not None:
+            logging.error(
+                f"Background CSRF token prefetch failed: {exception!r}",
+                exc_info=exception,
+            )
+
+    def _spawn_prefetch_task(self) -> None:
+        """Start a background prefetch of the next client and CSRF token."""
+        task = asyncio.create_task(self._prefetch_client_with_csrf_token())
+        # Hold a strong reference so the task cannot be garbage collected mid-flight
+        self._prefetch_tasks.add(task)
+        task.add_done_callback(self._on_prefetch_task_done)
 
     def _extract_and_update_profile(self, node: Node, idx: int, profile: dict) -> None:
         """Extract the profile data from a node and update the profile dictionary.

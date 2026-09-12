@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -617,3 +618,70 @@ async def test_prefetch_closes_new_client_when_caching_fails(mock_fetch, pesu):
         await pesu.prefetch_client_with_csrf_token()
 
     new_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_get_client_holds_strong_reference_to_prefetch_task(mock_fetch, pesu):
+    """The background prefetch task must be referenced so it cannot be garbage collected."""
+    mock_fetch.side_effect = [(AsyncMock(), "token-1"), (AsyncMock(), "token-2")]
+
+    await pesu._get_client_with_csrf_token()
+
+    assert len(pesu._prefetch_tasks) == 1
+    task = next(iter(pesu._prefetch_tasks))
+
+    await task
+    # add_done_callback fires via loop.call_soon, so yield once to let it run
+    await asyncio.sleep(0)
+
+    assert pesu._prefetch_tasks == set()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_prefetch_task_failure_is_logged(mock_fetch, pesu, caplog):
+    """A failing background prefetch must be logged, not silently swallowed."""
+    mock_fetch.side_effect = [(AsyncMock(), "token-1"), RuntimeError("upstream is down")]
+
+    await pesu._get_client_with_csrf_token()
+    task = next(iter(pesu._prefetch_tasks))
+    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    assert "Background CSRF token prefetch failed" in caplog.text
+    assert "upstream is down" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_prefetch_task_cancellation_is_not_logged(pesu, caplog):
+    """A cancelled prefetch task is expected during shutdown and must not be logged as a failure."""
+    task = asyncio.create_task(asyncio.sleep(3600))
+    pesu._prefetch_tasks.add(task)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    pesu._on_prefetch_task_done(task)
+
+    assert pesu._prefetch_tasks == set()
+    assert "Background CSRF token prefetch failed" not in caplog.text
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_authenticate_triggers_exactly_one_prefetch(mock_fetch, pesu):
+    """One authentication must cause one inline fetch plus exactly one background prefetch."""
+    client = AsyncMock()
+    response = MagicMock()
+    response.text = '<meta name="csrf-token" content="new-csrf-token">'
+    client.post.return_value = response
+    mock_fetch.side_effect = [(client, "token-1"), (AsyncMock(), "token-2")]
+
+    await pesu.authenticate("testuser", "testpass")
+
+    for task in list(pesu._prefetch_tasks):
+        await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    # One cold-cache inline fetch for this request, one prefetch for the next. Never more.
+    assert mock_fetch.await_count == 2
