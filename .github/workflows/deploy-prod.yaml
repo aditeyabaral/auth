@@ -46,7 +46,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: sync-dev-to-main
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
-    environment: production
     permissions:
       contents: read
     env:
@@ -125,7 +124,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [sync-dev-to-main, push-to-dockerhub, push-to-ghcr]
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
-    environment: staging
     permissions:
       contents: read
     env:
@@ -152,7 +150,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [sync-dev-to-main, push-to-dockerhub, push-to-ghcr, deploy-to-staging]
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
-    environment: production
     permissions:
       contents: read
     env:
