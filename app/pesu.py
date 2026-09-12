@@ -72,14 +72,19 @@ class PESUAcademy:
         logging.info("Fetching a new client with an unauthenticated CSRF token...")
         # Create a new client
         client = httpx.AsyncClient(follow_redirects=True, timeout=10.0)
-        # Fetch the CSRF token
-        resp = await client.get("https://www.pesuacademy.com/Academy/")
-        soup = await asyncio.to_thread(HTMLParser, resp.text)
-        if node := soup.css_first("meta[name='csrf-token']"):
-            csrf_token = node.attributes["content"]
-            logging.info(f"Fetched CSRF token: {csrf_token}")
-            return client, csrf_token
-        raise CSRFTokenError("CSRF token not found in the pre-authentication response.")
+        # On success the client is handed to the caller, so only close it if we fail to return it
+        try:
+            # Fetch the CSRF token
+            resp = await client.get("https://www.pesuacademy.com/Academy/")
+            soup = await asyncio.to_thread(HTMLParser, resp.text)
+            if node := soup.css_first("meta[name='csrf-token']"):
+                csrf_token = node.attributes["content"]
+                logging.info(f"Fetched CSRF token: {csrf_token}")
+                return client, csrf_token
+            raise CSRFTokenError("CSRF token not found in the pre-authentication response.")
+        except BaseException:
+            await client.aclose()
+            raise
 
     async def _prefetch_client_with_csrf_token(self) -> None:
         """Prefetch a new client with an unauthenticated CSRF token.
@@ -90,13 +95,19 @@ class PESUAcademy:
         """
         logging.info("Prefetching a new client with an unauthenticated CSRF token...")
         client, token = await self._fetch_new_client_with_csrf_token()
-        async with self._csrf_lock:
-            # Close old cached client (if any) to avoid leaks
-            if self._client is not None:
-                await self._client.aclose()
-            # Store the new cached client/token
-            self._client = client
-            self._csrf_token = token
+        # Until the new client is cached nothing else can reach it, so close it if we never get there
+        # (for example if this task is cancelled while waiting for the lock during shutdown)
+        try:
+            async with self._csrf_lock:
+                # Close old cached client (if any) to avoid leaks
+                if self._client is not None:
+                    await self._client.aclose()
+                # Store the new cached client/token
+                self._client = client
+                self._csrf_token = token
+        except BaseException:
+            await client.aclose()
+            raise
         logging.info("Cache refreshed with new unauthenticated CSRF token.")
 
     async def _get_client_with_csrf_token(self) -> tuple[httpx.AsyncClient, str]:
@@ -287,56 +298,57 @@ class PESUAcademy:
 
         # Get a pre-fetched csrf token and client
         client, csrf_token = await self._get_client_with_csrf_token()
-        logging.debug(f"Using cached CSRF token for user={username}.")
+        # This client belongs to this request, so close it on every exit path, not just success
+        try:
+            logging.debug(f"Using cached CSRF token for user={username}.")
 
-        # Prepare the login data for auth call
-        data = {
-            "_csrf": csrf_token,
-            "j_username": username,
-            "j_password": password,
-        }
+            # Prepare the login data for auth call
+            data = {
+                "_csrf": csrf_token,
+                "j_username": username,
+                "j_password": password,
+            }
 
-        logging.debug("Attempting to authenticate user...")
-        # Make a post request to authenticate the user
-        auth_url = "https://www.pesuacademy.com/Academy/j_spring_security_check"
-        response = await client.post(auth_url, data=data)
-        soup = await asyncio.to_thread(HTMLParser, response.text)
-        logging.debug("Authentication response received.")
+            logging.debug("Attempting to authenticate user...")
+            # Make a post request to authenticate the user
+            auth_url = "https://www.pesuacademy.com/Academy/j_spring_security_check"
+            response = await client.post(auth_url, data=data)
+            soup = await asyncio.to_thread(HTMLParser, response.text)
+            logging.debug("Authentication response received.")
 
-        # If class login-form is present, login failed
-        if soup.css_first("div.login-form"):
-            # Log the error and return the error message
-            raise AuthenticationError(
-                f"Invalid username or password, or user does not exist for user={username}.",
-            )
-
-        # If the user is successfully authenticated
-        logging.info(f"Login successful for user={username}.")
-        status = True
-        # Get the newly authenticated csrf token
-        if csrf_node := soup.css_first("meta[name='csrf-token']"):
-            csrf_token = csrf_node.attributes.get("content")
-            logging.debug(f"Authenticated CSRF token: {csrf_token}")
-        else:
-            raise CSRFTokenError(
-                f"CSRF token not found in the post-authentication response for user={username}.",
-            )
-
-        result = {"status": status, "message": "Login successful."}
-
-        if profile:
-            logging.info(f"Profile data requested for user={username}. Fetching profile data...")
-            # Fetch the profile information
-            result["profile"] = await self.get_profile_information(client, username)
-            # Filter the fields if field filtering is enabled
-            if field_filtering:
-                result["profile"] = {key: value for key, value in result["profile"].items() if key in fields}
-                logging.info(
-                    f"Field filtering enabled. Filtered profile data for user={username}: {result['profile']}",
+            # If class login-form is present, login failed
+            if soup.css_first("div.login-form"):
+                # Log the error and return the error message
+                raise AuthenticationError(
+                    f"Invalid username or password, or user does not exist for user={username}.",
                 )
 
-        logging.info(f"Authentication process for user={username} completed successfully.")
+            # If the user is successfully authenticated
+            logging.info(f"Login successful for user={username}.")
+            status = True
+            # Get the newly authenticated csrf token
+            if csrf_node := soup.css_first("meta[name='csrf-token']"):
+                csrf_token = csrf_node.attributes.get("content")
+                logging.debug(f"Authenticated CSRF token: {csrf_token}")
+            else:
+                raise CSRFTokenError(
+                    f"CSRF token not found in the post-authentication response for user={username}.",
+                )
 
-        # Close the client and return the result
-        await client.aclose()
-        return result
+            result = {"status": status, "message": "Login successful."}
+
+            if profile:
+                logging.info(f"Profile data requested for user={username}. Fetching profile data...")
+                # Fetch the profile information
+                result["profile"] = await self.get_profile_information(client, username)
+                # Filter the fields if field filtering is enabled
+                if field_filtering:
+                    result["profile"] = {key: value for key, value in result["profile"].items() if key in fields}
+                    logging.info(
+                        f"Field filtering enabled. Filtered profile data for user={username}: {result['profile']}",
+                    )
+
+            logging.info(f"Authentication process for user={username} completed successfully.")
+            return result
+        finally:
+            await client.aclose()

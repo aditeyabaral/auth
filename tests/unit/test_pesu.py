@@ -504,3 +504,116 @@ async def test_prefetch_client_closes_old_client_on_second_call(mock_fetch, pesu
     await pesu.prefetch_client_with_csrf_token()
 
     old_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_authenticate_closes_client_on_authentication_error(mock_get_client, pesu):
+    """The request's client must be closed when the credentials are rejected."""
+    client = AsyncMock()
+    login_failed_response = AsyncMock()
+    login_failed_response.text = '<div class="login-form"></div>'
+    client.post.return_value = login_failed_response
+    mock_get_client.return_value = (client, "fake-csrf-token")
+
+    with pytest.raises(AuthenticationError):
+        await pesu.authenticate("testuser", "wrongpass")
+
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_authenticate_closes_client_on_missing_post_login_csrf_token(mock_get_client, pesu):
+    """The request's client must be closed when the post-login CSRF token is absent."""
+    client = AsyncMock()
+    response = AsyncMock()
+    response.text = "<html><body>no csrf meta tag and no login form</body></html>"
+    client.post.return_value = response
+    mock_get_client.return_value = (client, "fake-csrf-token")
+
+    with pytest.raises(CSRFTokenError):
+        await pesu.authenticate("testuser", "testpass")
+
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy.get_profile_information")
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_authenticate_closes_client_on_profile_fetch_error(mock_get_client, mock_get_profile, pesu):
+    """The request's client must be closed when profile fetching fails."""
+    client = AsyncMock()
+    response = AsyncMock()
+    response.text = '<meta name="csrf-token" content="new-csrf-token">'
+    client.post.return_value = response
+    mock_get_client.return_value = (client, "fake-csrf-token")
+    mock_get_profile.side_effect = ProfileFetchError("boom")
+
+    with pytest.raises(ProfileFetchError):
+        await pesu.authenticate("testuser", "testpass", profile=True)
+
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_authenticate_closes_client_on_success(mock_get_client, pesu):
+    """The request's client must also be closed on the success path."""
+    client = AsyncMock()
+    response = AsyncMock()
+    response.text = '<meta name="csrf-token" content="new-csrf-token">'
+    client.post.return_value = response
+    mock_get_client.return_value = (client, "fake-csrf-token")
+
+    result = await pesu.authenticate("testuser", "testpass")
+
+    assert result["status"] is True
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.httpx.AsyncClient")
+async def test_fetch_new_client_closes_client_when_csrf_token_missing(mock_client_class, pesu):
+    """A client that never gets returned to the caller must not be leaked."""
+    client = AsyncMock()
+    response = AsyncMock()
+    response.text = "<html><body>no csrf meta tag</body></html>"
+    client.get.return_value = response
+    mock_client_class.return_value = client
+
+    with pytest.raises(CSRFTokenError):
+        await pesu._fetch_new_client_with_csrf_token()
+
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.httpx.AsyncClient")
+async def test_fetch_new_client_closes_client_when_get_fails(mock_client_class, pesu):
+    """A client whose initial GET fails must not be leaked."""
+    client = AsyncMock()
+    client.get.side_effect = RuntimeError("connection reset")
+    mock_client_class.return_value = client
+
+    with pytest.raises(RuntimeError):
+        await pesu._fetch_new_client_with_csrf_token()
+
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_prefetch_closes_new_client_when_caching_fails(mock_fetch, pesu):
+    """If the freshly fetched client can never be cached, it must be closed rather than leaked."""
+    old_client = AsyncMock()
+    old_client.aclose.side_effect = RuntimeError("old client refused to close")
+    new_client = AsyncMock()
+    pesu._client = old_client
+    pesu._csrf_token = "stale-token"
+    mock_fetch.return_value = (new_client, "fresh-token")
+
+    with pytest.raises(RuntimeError):
+        await pesu.prefetch_client_with_csrf_token()
+
+    new_client.aclose.assert_awaited_once()
