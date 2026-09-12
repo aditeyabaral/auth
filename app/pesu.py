@@ -228,10 +228,12 @@ class PESUAcademy:
         Cancelling is safe rather than leaky because both prefetch stages close their own client
         if they are interrupted before it reaches the cache.
         """
-        for task in tuple(self._prefetch_tasks):
+        # Snapshot once: the done callbacks mutate the set as the tasks finish
+        tasks = tuple(self._prefetch_tasks)
+        for task in tasks:
             task.cancel()
-        if self._prefetch_tasks:
-            await asyncio.gather(*tuple(self._prefetch_tasks), return_exceptions=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         async with self._csrf_lock:
             if self._client is not None:
                 await _close_client_quietly(self._client)

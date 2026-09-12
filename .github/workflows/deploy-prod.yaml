@@ -125,7 +125,7 @@ jobs:
     steps:
       - name: Check Staging Deploy Hook URL
         run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }}" ]; then
+          if [ -z "$RENDER_DEPLOY_HOOK_URL_DEV" ]; then
             echo "❌ Staging deploy hook missing!"
             exit 1
           fi
@@ -149,7 +149,7 @@ jobs:
     steps:
       - name: Check Production Deploy Hook URL
         run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL_PROD }}" ]; then
+          if [ -z "$RENDER_DEPLOY_HOOK_URL_PROD" ]; then
             echo "❌ Production deploy hook missing!"
             exit 1
           fi

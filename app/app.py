@@ -105,9 +105,13 @@ pesu_academy = PESUAcademy()
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Handler for request validation errors."""
-    # A malformed request is the caller's mistake, not a server fault, so no stack trace
-    logging.warning(f"Request data could not be validated: {exc.errors()}")
     errors = exc.errors()
+    # Log only the shape of the failure, never the submitted values. Each entry from `errors()`
+    # carries an "input" key which, for a missing required field, is the *entire request body* --
+    # so logging it verbatim would write the user's password to the logs in plaintext.
+    safe_errors = [{"type": e.get("type"), "loc": e.get("loc"), "msg": e.get("msg")} for e in errors]
+    # A malformed request is the caller's mistake, not a server fault, so no stack trace
+    logging.warning(f"Request data could not be validated: {safe_errors}")
     message = "; ".join([f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in errors])
     return JSONResponse(
         status_code=400,

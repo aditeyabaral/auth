@@ -171,3 +171,22 @@ def test_validation_error_is_logged_without_a_traceback(client, caplog):
     assert records, "the 400 should still be logged"
     assert all(r.levelname == "WARNING" for r in records)
     assert all(r.exc_info is None for r in records)
+
+
+def test_validation_error_never_logs_submitted_values(client, caplog):
+    """A validation failure must never write the submitted password into the logs.
+
+    `RequestValidationError.errors()` includes an "input" key which, for a missing required
+    field, is the whole request body -- so logging the errors verbatim leaks the password.
+    """
+    secret = "hunter2-actual-secret"
+
+    with caplog.at_level("WARNING"):
+        response = client.post("/authenticate", json={"password": secret})
+
+    assert response.status_code == 400
+    assert secret not in caplog.text, "the submitted password must not reach the logs"
+    assert secret not in response.text, "the submitted password must not reach the response"
+    # The diagnostic value is kept: which field, and why
+    assert "username" in caplog.text
+    assert "Field required" in caplog.text
