@@ -7,9 +7,6 @@ on:
       - completed
   workflow_dispatch:
 
-# Staging deploys are always for dev, so one constant group serialises them across both event
-# types. Keying the group on github.event.workflow_run.head_branch would leave it empty on a
-# manual dispatch and stop grouping the two paths together.
 concurrency:
   group: deploy-staging
   cancel-in-progress: false
@@ -18,8 +15,6 @@ jobs:
   # Deploy to staging environment
   deploy-staging:
     runs-on: ubuntu-latest
-    # Automatic path: only a successful Pre-Commit Checks run on dev.
-    # Manual path: only ever dev, so a dispatch cannot ship an arbitrary branch to staging.
     if: >-
       ${{
         (github.event_name == 'workflow_run'

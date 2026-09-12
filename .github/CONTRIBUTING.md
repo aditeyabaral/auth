@@ -74,7 +74,7 @@ projects.
 
 ### Prerequisites
 
-- Python 3.12 or higher
+- Python 3.14 or higher
 - Git
 - Docker
 
@@ -83,7 +83,7 @@ projects.
 1. **Create and activate a virtual environment:**
 
    ```bash
-   uv venv --python 3.12
+   uv venv --python 3.14
    source .venv/bin/activate
    ```
 
@@ -258,7 +258,7 @@ To keep the codebase clean and maintainable, please follow these conventions:
 - Write clean, readable code
 - Use meaningful variable and function names
 - Avoid large functions; keep logic modular and composable
-- Use Python 3.12+ syntax when appropriate (e.g., `match`, `|` union types)
+- Use Python 3.14+ syntax when appropriate (e.g., `match`, `|` union types)
 - Keep imports sorted and remove unused ones (handled automatically via `ruff`)
 
 ### 📝 Docstrings & Comments

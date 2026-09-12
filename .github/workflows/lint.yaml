@@ -12,10 +12,6 @@ on:
       - reopened
 
 jobs:
-  # Ruff is a self-contained binary whose results depend on its own version and on
-  # tool.ruff.target-version, not on the interpreter it was installed beside -- so a matrix over
-  # Python versions would run three byte-identical jobs. The test suite is where interpreter
-  # differences show up, and pre-commit.yaml already matrices that across 3.12, 3.13 and 3.14.
   lint:
     runs-on: ubuntu-latest
 
@@ -25,16 +21,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
-      # Same bootstrap as pre-commit.yaml. astral-sh/setup-uv publishes no floating major tag,
-      # so using the action would mean pinning an exact version here and bumping it by hand.
       - name: Install uv
         run: pip install uv
 
-      # Run the ruff from uv.lock, so this job, the pre-commit hook and a local `uv run ruff`
-      # cannot disagree. An unpinned `pip install ruff` used to fail PRs that changed nothing,
-      # whenever a release added a rule.
       - name: Run Ruff Lint
         run: uv run --only-group dev ruff check . --output-format=github
 

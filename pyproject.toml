@@ -3,7 +3,7 @@ name = "pesu-auth"
 version = "4.1.0"
 description = "A simple API to authenticate PESU credentials using PESU Academy."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = { text = "MIT" }
 authors = [
     { name = "Aditeya Baral", email = "aditeya.baral@gmail.com" }
@@ -70,7 +70,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py314"
 exclude = [
     "tests/"
 ]
