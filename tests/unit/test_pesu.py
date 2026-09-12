@@ -605,8 +605,8 @@ async def test_fetch_new_client_closes_client_when_get_fails(mock_client_class, 
 
 @pytest.mark.asyncio
 @patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
-async def test_prefetch_closes_new_client_when_caching_fails(mock_fetch, pesu):
-    """If the freshly fetched client can never be cached, it must be closed rather than leaked."""
+async def test_prefetch_survives_a_broken_old_client(mock_fetch, pesu, caplog):
+    """A cached client that refuses to close must not stop the refresh; the failure is logged."""
     old_client = AsyncMock()
     old_client.aclose.side_effect = RuntimeError("old client refused to close")
     new_client = AsyncMock()
@@ -614,10 +614,69 @@ async def test_prefetch_closes_new_client_when_caching_fails(mock_fetch, pesu):
     pesu._csrf_token = "stale-token"
     mock_fetch.return_value = (new_client, "fresh-token")
 
-    with pytest.raises(RuntimeError):
-        await pesu.prefetch_client_with_csrf_token()
+    await pesu.prefetch_client_with_csrf_token()
+
+    assert "Failed to close an HTTP client cleanly." in caplog.text
+    # The refresh still went through, and the new client was cached rather than closed
+    assert pesu._client is new_client
+    assert pesu._csrf_token == "fresh-token"
+    new_client.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_prefetch_closes_new_client_when_cancelled_before_caching(mock_fetch, pesu):
+    """A prefetch cancelled before it can cache its client must close it, not leak it."""
+    new_client = AsyncMock()
+    mock_fetch.return_value = (new_client, "fresh-token")
+
+    # Hold the lock so the prefetch blocks at the swap, exactly as it would during shutdown
+    await pesu._csrf_lock.acquire()
+    task = asyncio.create_task(pesu._prefetch_client_with_csrf_token())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    pesu._csrf_lock.release()
 
     new_client.aclose.assert_awaited_once()
+    assert pesu._client is None
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_close_client_cancels_in_flight_prefetch(mock_fetch, pesu):
+    """Shutdown must stop in-flight prefetches, or one can cache a client after the close."""
+    slow_client = AsyncMock()
+
+    async def slow_fetch():
+        await asyncio.sleep(3600)
+        return slow_client, "never-arrives"
+
+    mock_fetch.side_effect = slow_fetch
+    pesu._spawn_prefetch_task()
+    await asyncio.sleep(0.01)
+    assert len(pesu._prefetch_tasks) == 1
+    task = next(iter(pesu._prefetch_tasks))
+
+    await pesu.close_client()
+
+    assert task.cancelled()
+    assert pesu._client is None
+    assert pesu._csrf_token is None
+
+
+@pytest.mark.asyncio
+async def test_close_client_clears_cached_client_and_token(pesu):
+    """The cached client is closed and both cache slots are cleared."""
+    client = AsyncMock()
+    pesu._client = client
+    pesu._csrf_token = "cached-token"
+
+    await pesu.close_client()
+
+    client.aclose.assert_awaited_once()
+    assert pesu._client is None
+    assert pesu._csrf_token is None
 
 
 @pytest.mark.asyncio

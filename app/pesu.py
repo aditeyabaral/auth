@@ -31,6 +31,22 @@ ProfileField = Literal[
 ]
 
 
+async def _close_client_quietly(client: httpx.AsyncClient) -> None:
+    """Close an HTTP client, logging rather than raising if the close itself fails.
+
+    Cleanup failure must never replace the error that triggered the cleanup: letting `aclose()`
+    propagate out of a `finally` would turn a routine 401 into a 500. `CancelledError` is not
+    caught, since cancellation still has to propagate.
+
+    Args:
+        client (httpx.AsyncClient): The client to close.
+    """
+    try:
+        await client.aclose()
+    except Exception:
+        logging.warning("Failed to close an HTTP client cleanly.", exc_info=True)
+
+
 class PESUAcademy:
     """Class to interact with the PESU Academy server.
 
@@ -43,7 +59,7 @@ class PESUAcademy:
 
     Methods:
         prefetch_client_with_csrf_token: Prefetch a new client with an unauthenticated CSRF token.
-        close_client: Close the internal client if it exists.
+        close_client: Close the cached client and stop any prefetch still in flight.
         get_profile_information: Get the profile information of the user.
         authenticate: Authenticate the user with the provided username and password.
     """
@@ -86,7 +102,7 @@ class PESUAcademy:
                 return client, csrf_token
             raise CSRFTokenError("CSRF token not found in the pre-authentication response.")
         except BaseException:
-            await client.aclose()
+            await _close_client_quietly(client)
             raise
 
     async def _prefetch_client_with_csrf_token(self) -> None:
@@ -102,14 +118,15 @@ class PESUAcademy:
         # (for example if this task is cancelled while waiting for the lock during shutdown)
         try:
             async with self._csrf_lock:
-                # Close old cached client (if any) to avoid leaks
+                # Close old cached client (if any) to avoid leaks. A failure to close the old
+                # client must not stop the refresh, so it is logged rather than raised.
                 if self._client is not None:
-                    await self._client.aclose()
+                    await _close_client_quietly(self._client)
                 # Store the new cached client/token
                 self._client = client
                 self._csrf_token = token
         except BaseException:
-            await client.aclose()
+            await _close_client_quietly(client)
             raise
         logging.info("Cache refreshed with new unauthenticated CSRF token.")
 
@@ -121,17 +138,20 @@ class PESUAcademy:
         for each request.
         """
         async with self._csrf_lock:
-            # If cache is empty (first call), populate it
-            if not (self._client and self._csrf_token):
-                (
-                    self._client,
-                    self._csrf_token,
-                ) = await self._fetch_new_client_with_csrf_token()
-            # Hand out the cached client/token for *this* request
-            client_to_use, token_to_use = self._client, self._csrf_token
-            # Immediately clear the cache so the next caller doesn't reuse this client/token
-            self._client = None
-            self._csrf_token = None
+            # Take the cached client/token for *this* request, if the cache is warm, and clear
+            # the cache immediately so the next caller cannot reuse them
+            cached = self._client is not None and self._csrf_token is not None
+            if cached:
+                client_to_use, token_to_use = self._client, self._csrf_token
+                self._client = None
+                self._csrf_token = None
+
+        if not cached:
+            # Cold cache: fetch *outside* the lock. Holding it across a fetch would queue every
+            # concurrent request behind a 10s upstream timeout, and would not save any work --
+            # each caller needs its own client, so they were already fetching one apiece, just
+            # one at a time.
+            client_to_use, token_to_use = await self._fetch_new_client_with_csrf_token()
 
         # Kick off async prefetch for the *next* request (non-blocking)
         self._spawn_prefetch_task()
@@ -201,14 +221,22 @@ class PESUAcademy:
         await self._prefetch_client_with_csrf_token()
 
     async def close_client(self) -> None:
-        """Public method to close the internal client if it exists.
+        """Close the cached client and stop any prefetch still in flight.
 
-        This method is used to close the internal client if it exists.
-        It is used to avoid the overhead of closing the client for each request.
+        The prefetches are cancelled first. Without that, one can complete *after* the cached
+        client has been closed and quietly cache a fresh client that nobody ever closes.
+        Cancelling is safe rather than leaky because both prefetch stages close their own client
+        if they are interrupted before it reaches the cache.
         """
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        for task in tuple(self._prefetch_tasks):
+            task.cancel()
+        if self._prefetch_tasks:
+            await asyncio.gather(*tuple(self._prefetch_tasks), return_exceptions=True)
+        async with self._csrf_lock:
+            if self._client is not None:
+                await _close_client_quietly(self._client)
+                self._client = None
+                self._csrf_token = None
 
     async def get_profile_information(
         self,
@@ -381,4 +409,4 @@ class PESUAcademy:
             logging.info(f"Authentication process for user={username} completed successfully.")
             return result
         finally:
-            await client.aclose()
+            await _close_client_quietly(client)
