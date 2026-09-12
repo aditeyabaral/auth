@@ -4,13 +4,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.exceptions.authentication import AuthenticationError, CSRFTokenError
+
 from app.app import _csrf_token_refresh_loop, _refresh_csrf_token, app, main
 
 
 @pytest.fixture
 def client():
-    with TestClient(app, raise_server_exceptions=False) as client:
-        yield client
+    # Patch the prefetch/close so entering the real lifespan does not hit the network. Without
+    # this, every test using this fixture makes a live request to pesuacademy.com. `authenticate`
+    # is deliberately left unpatched so individual tests can still patch it themselves.
+    with (
+        patch("app.app.pesu_academy.prefetch_client_with_csrf_token", new_callable=AsyncMock),
+        patch("app.app.pesu_academy.close_client", new_callable=AsyncMock),
+    ):
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
 
 
 @patch("app.app.pesu_academy.authenticate")
@@ -121,3 +130,44 @@ def test_authenticate_does_not_trigger_additional_prefetch(mocked_pesu_client):
     # Starlette runs background tasks before TestClient returns, so any endpoint-level
     # prefetch would already be counted here.
     assert mock_pesu.prefetch_client_with_csrf_token.await_count == before
+
+
+def test_client_error_is_logged_without_a_traceback(client, caplog):
+    """A 4xx is an expected outcome, so it must be logged at WARNING with no stack trace."""
+    with patch("app.app.pesu_academy.authenticate") as mock_authenticate:
+        mock_authenticate.side_effect = AuthenticationError("Invalid username or password.")
+        with caplog.at_level("WARNING"):
+            response = client.post("/authenticate", json={"username": "user", "password": "wrong"})
+
+    assert response.status_code == 401
+    records = [r for r in caplog.records if "AuthenticationError" in r.message]
+    assert records, "the 401 should still be logged"
+    assert all(r.levelname == "WARNING" for r in records)
+    # The point of the change: no traceback attached to a routine wrong password
+    assert all(r.exc_info is None for r in records)
+
+
+def test_server_error_is_logged_with_a_traceback(client, caplog):
+    """A 5xx is genuinely our problem or the upstream's, so it keeps the stack trace."""
+    with patch("app.app.pesu_academy.authenticate") as mock_authenticate:
+        mock_authenticate.side_effect = CSRFTokenError("CSRF token could not be extracted.")
+        with caplog.at_level("ERROR"):
+            response = client.post("/authenticate", json={"username": "user", "password": "pass"})
+
+    assert response.status_code == 502
+    records = [r for r in caplog.records if "CSRFTokenError" in r.message]
+    assert records, "the 502 should be logged"
+    assert all(r.levelname == "ERROR" for r in records)
+    assert any(r.exc_info is not None for r in records)
+
+
+def test_validation_error_is_logged_without_a_traceback(client, caplog):
+    """A malformed request is the caller's mistake, so no stack trace either."""
+    with caplog.at_level("WARNING"):
+        response = client.post("/authenticate", json={"password": "no username here"})
+
+    assert response.status_code == 400
+    records = [r for r in caplog.records if "could not be validated" in r.message]
+    assert records, "the 400 should still be logged"
+    assert all(r.levelname == "WARNING" for r in records)
+    assert all(r.exc_info is None for r in records)

@@ -105,7 +105,8 @@ pesu_academy = PESUAcademy()
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Handler for request validation errors."""
-    logging.exception("Request data could not be validated.")
+    # A malformed request is the caller's mistake, not a server fault, so no stack trace
+    logging.warning(f"Request data could not be validated: {exc.errors()}")
     errors = exc.errors()
     message = "; ".join([f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in errors])
     return JSONResponse(
@@ -121,7 +122,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(PESUAcademyError)
 async def pesu_exception_handler(request: Request, exc: PESUAcademyError) -> JSONResponse:
     """Handler for PESUAcademy specific errors."""
-    logging.exception(f"PESUAcademyError: {exc.message}")
+    # Severity follows the status code. A 4xx is an expected outcome -- a wrong password is the
+    # API working correctly -- and logging one at ERROR with a traceback both buries real faults
+    # and pages whoever alerts on the error rate. Only 5xx gets a stack trace.
+    if exc.status_code < 500:
+        logging.warning(f"{type(exc).__name__}: {exc.message}")
+    else:
+        logging.exception(f"{type(exc).__name__}: {exc.message}")
     return JSONResponse(
         status_code=exc.status_code,
         content={
