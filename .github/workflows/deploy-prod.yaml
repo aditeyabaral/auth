@@ -10,7 +10,7 @@ jobs:
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -49,7 +49,7 @@ jobs:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 
@@ -90,7 +90,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 
@@ -133,7 +133,7 @@ jobs:
       - name: Deploy to Staging
         run: |
           echo "🚀 Deploying to Staging..."
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }} || {
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL_DEV" || {
             echo "❌ Staging deploy failed!"
             exit 1
           }
@@ -157,7 +157,7 @@ jobs:
       - name: Deploy to Production
         run: |
           echo "🚀 Deploying to Production..."
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL_PROD }} || {
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL_PROD" || {
             echo "❌ Production deploy failed!"
             exit 1
           }
