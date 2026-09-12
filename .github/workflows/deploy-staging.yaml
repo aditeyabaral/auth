@@ -22,8 +22,6 @@ jobs:
           && github.event.workflow_run.head_branch == 'dev')
         || (github.event_name == 'workflow_dispatch' && github.ref_name == 'dev')
       }}
-    permissions:
-      contents: read
     env:
       RENDER_DEPLOY_HOOK_URL_DEV: ${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }}
     steps:
