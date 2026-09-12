@@ -22,10 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # Same bootstrap as pre-commit.yaml. astral-sh/setup-uv publishes no floating major tag,
+      # so using the action would mean pinning an exact version here and bumping it by hand.
+      - name: Install uv
+        run: pip install uv
 
       # Run the ruff from uv.lock, so this job, the pre-commit hook and a local `uv run ruff`
       # cannot disagree. An unpinned `pip install ruff` used to fail PRs that changed nothing,
