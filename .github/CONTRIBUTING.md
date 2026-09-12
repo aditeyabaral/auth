@@ -18,6 +18,7 @@ your development environment and contributing to the project.
   - [Pre-commit Hooks](#pre-commit-hooks-1)
   - [Linting & Formatting](#linting--formatting)
 - [🧪 Running Tests](#-running-tests)
+  - [Tests that need credentials](#tests-that-need-credentials)
   - [Writing Tests](#writing-tests)
 - [🚀 Submitting Changes](#-submitting-changes)
   - [🔀 Create a Branch](#-create-a-branch)
@@ -166,6 +167,21 @@ uv run pytest --cov
 
 > [!NOTE]
 > The pre-commit hook runs `python scripts/run_tests.py`, which uses the same underlying `pytest` runner.
+
+### Tests that need credentials
+
+Eleven tests are marked `secret_required` and log in to PESU Academy for real. They need the
+`TEST_*` variables in your `.env`; without them `scripts/run_tests.py` deselects those tests, warns
+that it has done so, and still enforces the coverage gate on the rest.
+
+The test account allows **one active session**, so never run the live tests while another run is in
+flight -- including CI. A second login is rejected and shows up as a puzzling `401`.
+
+In CI, pull requests come from forks, and GitHub withholds secrets from fork pull requests. So
+*Pre-Commit Checks* always runs the reduced suite on a pull request, and the live tests run in a
+separate **Live Tests** workflow that a maintainer has to approve first. Until they approve it, the
+job sits pending -- that is expected, not a failure, and it is deliberate: approving means running
+your branch's code with the test account's credentials. Every new push needs approval again.
 
 ### Writing Tests
 
