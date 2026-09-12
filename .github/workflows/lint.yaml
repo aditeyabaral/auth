@@ -14,25 +14,20 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 5
-      matrix:
-        python-version: [ "3.12", "3.13", "3.14" ]
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+      - uses: actions/checkout@v7
 
-      - name: Install Ruff
-        run: pip install ruff
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: pip install uv
 
       - name: Run Ruff Lint
-        run: |
-          ruff check . --output-format=github
+        run: uv run --only-group dev ruff check . --output-format=github
 
       - name: Run Ruff Format Check
-        run: |
-          ruff format . --check
+        run: uv run --only-group dev ruff format . --check

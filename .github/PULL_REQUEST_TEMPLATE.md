@@ -45,7 +45,7 @@ Please provide a concise summary of the changes:
 > ⚙️ **Test Configuration:**
 >
 > - OS: (e.g., `Linux`)
-> - Python: (e.g., `3.12` via `uv`)
+> - Python: (e.g., `3.14` via `uv`)
 > - [ ] Docker build tested
 
 ## ✅ Checklist

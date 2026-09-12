@@ -73,14 +73,14 @@ following commands to start the API.
 
 ### Running without Docker
 
-If you don't have Docker installed, you can run the API natively. Ensure you have Python 3.12 or higher
+If you don't have Docker installed, you can run the API natively. Ensure you have Python 3.14 or higher
 installed on your system. We recommend using a package manager like [`uv`](https://docs.astral.sh/uv/) to manage
 dependencies.
 
 1. Create a virtual environment using and activate it. Then, install the dependencies using the following commands.
 
    ```bash
-   uv venv --python=3.12
+   uv venv --python=3.14
    source .venv/bin/activate
    uv sync
    ```
@@ -157,11 +157,11 @@ does not take any request parameters.
 
 #### Response Object
 
-| **Field**   | **Type** | **Description**                                                   |
-| ----------- | -------- | ----------------------------------------------------------------- |
-| `status`    | `str`    | `true` if healthy, `false` if there was an error                  |
-| `message`   | `str`    | "ok" if healthy, error message otherwise                          |
-| `timestamp` | `string` | A timezone offset timestamp indicating the time of authentication |
+| **Field**   | **Type**   | **Description**                                                     |
+| ----------- | ---------- | ------------------------------------------------------------------- |
+| `status`    | `boolean`  | `true` if healthy, `false` if there was an error                    |
+| `message`   | `str`      | "ok" if healthy, error message otherwise                            |
+| `timestamp` | `datetime` | A timezone offset timestamp indicating the time of the health check |
 
 ### `/readme`
 

@@ -18,6 +18,7 @@ your development environment and contributing to the project.
   - [Pre-commit Hooks](#pre-commit-hooks-1)
   - [Linting & Formatting](#linting--formatting)
 - [🧪 Running Tests](#-running-tests)
+  - [Tests that need credentials](#tests-that-need-credentials)
   - [Writing Tests](#writing-tests)
 - [🚀 Submitting Changes](#-submitting-changes)
   - [🔀 Create a Branch](#-create-a-branch)
@@ -74,7 +75,7 @@ projects.
 
 ### Prerequisites
 
-- Python 3.12 or higher
+- Python 3.14 or higher
 - Git
 - Docker
 
@@ -83,7 +84,7 @@ projects.
 1. **Create and activate a virtual environment:**
 
    ```bash
-   uv venv --python 3.12
+   uv venv --python 3.14
    source .venv/bin/activate
    ```
 
@@ -166,6 +167,20 @@ uv run pytest --cov
 
 > [!NOTE]
 > The pre-commit hook runs `python scripts/run_tests.py`, which uses the same underlying `pytest` runner.
+
+### Tests that need credentials
+
+Eleven tests are marked `secret_required` and log in to PESU Academy for real. They need the
+`TEST_*` variables in your `.env`; without them `scripts/run_tests.py` deselects those tests, warns
+that it has done so, and still enforces the coverage gate on the rest.
+
+The test account allows **one active session**, so never run the live tests while another run is in
+flight -- including CI. A second login is rejected and shows up as a puzzling `401`.
+
+In CI, pull requests come from forks, and GitHub withholds secrets from fork pull requests. So
+*Pre-Commit Checks* runs the reduced suite on every pull request -- it says so in the run's summary
+-- and the live tests only run once the change reaches `dev`. Run them locally before you open a
+pull request; CI will not cover them for you.
 
 ### Writing Tests
 
@@ -258,7 +273,7 @@ To keep the codebase clean and maintainable, please follow these conventions:
 - Write clean, readable code
 - Use meaningful variable and function names
 - Avoid large functions; keep logic modular and composable
-- Use Python 3.12+ syntax when appropriate (e.g., `match`, `|` union types)
+- Use Python 3.14+ syntax when appropriate (e.g., `match`, `|` union types)
 - Keep imports sorted and remove unused ones (handled automatically via `ruff`)
 
 ### 📝 Docstrings & Comments

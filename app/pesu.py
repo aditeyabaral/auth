@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal, get_args
 
-import httpx
+import httpx2
 from selectolax.parser import HTMLParser, Node
 
 from app.exceptions.authentication import (
@@ -31,6 +31,46 @@ ProfileField = Literal[
 ]
 
 
+# Strong references to in-flight client closes. A close that outlives the coroutine which asked
+# for it (see _close_client_quietly) would otherwise be a bare task, free to be garbage collected
+# mid-flight. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+_CLOSE_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _aclose_client(client: httpx2.AsyncClient) -> None:
+    """Close an HTTP client, logging rather than raising if the close itself fails.
+
+    Cleanup failure must never replace the error that triggered the cleanup: letting `aclose()`
+    propagate out of a `finally` would turn a routine 401 into a 500.
+
+    Args:
+        client (httpx2.AsyncClient): The client to close.
+    """
+    try:
+        await client.aclose()
+    except Exception:
+        logging.warning("Failed to close an HTTP client cleanly.", exc_info=True)
+
+
+async def _close_client_quietly(client: httpx2.AsyncClient) -> None:
+    """Close an HTTP client, surviving both a failing close and a cancellation mid-close.
+
+    Most callers run this from an `except BaseException` handler or a `finally`, which is exactly
+    where a *second* cancellation can land -- a shutdown cancelling a task that is already
+    unwinding from its first cancellation. A plain `await client.aclose()` there is abandoned
+    part-way and the connection pool is never released, which is the leak this whole helper
+    exists to prevent. Shielding the close lets it run to completion in its own task while the
+    `CancelledError` still propagates to the caller, so cancellation semantics are unchanged.
+
+    Args:
+        client (httpx2.AsyncClient): The client to close.
+    """
+    task = asyncio.ensure_future(_aclose_client(client))
+    _CLOSE_TASKS.add(task)
+    task.add_done_callback(_CLOSE_TASKS.discard)
+    await asyncio.shield(task)
+
+
 class PESUAcademy:
     """Class to interact with the PESU Academy server.
 
@@ -43,7 +83,7 @@ class PESUAcademy:
 
     Methods:
         prefetch_client_with_csrf_token: Prefetch a new client with an unauthenticated CSRF token.
-        close_client: Close the internal client if it exists.
+        close_client: Close the cached client and stop any prefetch still in flight.
         get_profile_information: Get the profile information of the user.
         authenticate: Authenticate the user with the provided username and password.
     """
@@ -63,23 +103,31 @@ class PESUAcademy:
     def __init__(self) -> None:
         """Initialize the PESUAcademy class."""
         self._csrf_token: str | None = None
-        self._client: httpx.AsyncClient | None = None
+        self._client: httpx2.AsyncClient | None = None
         self._csrf_lock = asyncio.Lock()
+        # Strong references to in-flight prefetch tasks, so they cannot be garbage collected
+        # mid-flight. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+        self._prefetch_tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
-    async def _fetch_new_client_with_csrf_token() -> tuple[httpx.AsyncClient, str]:
+    async def _fetch_new_client_with_csrf_token() -> tuple[httpx2.AsyncClient, str]:
         """Initialize a fresh client with an unauthenticated CSRF token from PESU Academy."""
         logging.info("Fetching a new client with an unauthenticated CSRF token...")
         # Create a new client
-        client = httpx.AsyncClient(follow_redirects=True, timeout=10.0)
-        # Fetch the CSRF token
-        resp = await client.get("https://www.pesuacademy.com/Academy/")
-        soup = await asyncio.to_thread(HTMLParser, resp.text)
-        if node := soup.css_first("meta[name='csrf-token']"):
-            csrf_token = node.attributes["content"]
-            logging.info(f"Fetched CSRF token: {csrf_token}")
-            return client, csrf_token
-        raise CSRFTokenError("CSRF token not found in the pre-authentication response.")
+        client = httpx2.AsyncClient(follow_redirects=True, timeout=10.0)
+        # On success the client is handed to the caller, so only close it if we fail to return it
+        try:
+            # Fetch the CSRF token
+            resp = await client.get("https://www.pesuacademy.com/Academy/")
+            soup = await asyncio.to_thread(HTMLParser, resp.text)
+            if node := soup.css_first("meta[name='csrf-token']"):
+                csrf_token = node.attributes["content"]
+                logging.info(f"Fetched CSRF token: {csrf_token}")
+                return client, csrf_token
+            raise CSRFTokenError("CSRF token not found in the pre-authentication response.")
+        except BaseException:
+            await _close_client_quietly(client)
+            raise
 
     async def _prefetch_client_with_csrf_token(self) -> None:
         """Prefetch a new client with an unauthenticated CSRF token.
@@ -90,16 +138,23 @@ class PESUAcademy:
         """
         logging.info("Prefetching a new client with an unauthenticated CSRF token...")
         client, token = await self._fetch_new_client_with_csrf_token()
-        async with self._csrf_lock:
-            # Close old cached client (if any) to avoid leaks
-            if self._client is not None:
-                await self._client.aclose()
-            # Store the new cached client/token
-            self._client = client
-            self._csrf_token = token
+        # Until the new client is cached nothing else can reach it, so close it if we never get there
+        # (for example if this task is cancelled while waiting for the lock during shutdown)
+        try:
+            async with self._csrf_lock:
+                # Close old cached client (if any) to avoid leaks. A failure to close the old
+                # client must not stop the refresh, so it is logged rather than raised.
+                if self._client is not None:
+                    await _close_client_quietly(self._client)
+                # Store the new cached client/token
+                self._client = client
+                self._csrf_token = token
+        except BaseException:
+            await _close_client_quietly(client)
+            raise
         logging.info("Cache refreshed with new unauthenticated CSRF token.")
 
-    async def _get_client_with_csrf_token(self) -> tuple[httpx.AsyncClient, str]:
+    async def _get_client_with_csrf_token(self) -> tuple[httpx2.AsyncClient, str]:
         """Get the client with the cached CSRF token.
 
         This method is used to get the client with the cached CSRF token.
@@ -107,22 +162,52 @@ class PESUAcademy:
         for each request.
         """
         async with self._csrf_lock:
-            # If cache is empty (first call), populate it
-            if not (self._client and self._csrf_token):
-                (
-                    self._client,
-                    self._csrf_token,
-                ) = await self._fetch_new_client_with_csrf_token()
-            # Hand out the cached client/token for *this* request
-            client_to_use, token_to_use = self._client, self._csrf_token
-            # Immediately clear the cache so the next caller doesn't reuse this client/token
-            self._client = None
-            self._csrf_token = None
+            # Take the cached client/token for *this* request, if the cache is warm, and clear
+            # the cache immediately so the next caller cannot reuse them
+            cached = self._client is not None and self._csrf_token is not None
+            if cached:
+                client_to_use, token_to_use = self._client, self._csrf_token
+                self._client = None
+                self._csrf_token = None
+
+        if not cached:
+            # Cold cache: fetch *outside* the lock. Holding it across a fetch would queue every
+            # concurrent request behind a 10s upstream timeout, and would not save any work --
+            # each caller needs its own client, so they were already fetching one apiece, just
+            # one at a time.
+            client_to_use, token_to_use = await self._fetch_new_client_with_csrf_token()
 
         # Kick off async prefetch for the *next* request (non-blocking)
-        asyncio.create_task(self._prefetch_client_with_csrf_token())
+        self._spawn_prefetch_task()
         # Return a dedicated client/token for this request
         return client_to_use, token_to_use
+
+    def _on_prefetch_task_done(self, task: asyncio.Task[None]) -> None:
+        """Drop the finished prefetch task's reference and log any failure.
+
+        Retrieving the exception is what keeps a failed prefetch from being reported only as
+        "Task exception was never retrieved" when the task is garbage collected. A failed prefetch
+        is not fatal: the cache stays empty and the next request fetches a client inline instead.
+
+        Args:
+            task (asyncio.Task[None]): The prefetch task that has completed.
+        """
+        self._prefetch_tasks.discard(task)
+        # exception() raises on a cancelled task, so that has to be checked first
+        if task.cancelled():
+            return
+        if (exception := task.exception()) is not None:
+            logging.error(
+                f"Background CSRF token prefetch failed: {exception!r}",
+                exc_info=exception,
+            )
+
+    def _spawn_prefetch_task(self) -> None:
+        """Start a background prefetch of the next client and CSRF token."""
+        task = asyncio.create_task(self._prefetch_client_with_csrf_token())
+        # Hold a strong reference so the task cannot be garbage collected mid-flight
+        self._prefetch_tasks.add(task)
+        task.add_done_callback(self._on_prefetch_task_done)
 
     def _extract_and_update_profile(self, node: Node, idx: int, profile: dict) -> None:
         """Extract the profile data from a node and update the profile dictionary.
@@ -160,24 +245,34 @@ class PESUAcademy:
         await self._prefetch_client_with_csrf_token()
 
     async def close_client(self) -> None:
-        """Public method to close the internal client if it exists.
+        """Close the cached client and stop any prefetch still in flight.
 
-        This method is used to close the internal client if it exists.
-        It is used to avoid the overhead of closing the client for each request.
+        The prefetches are cancelled first. Without that, one can complete *after* the cached
+        client has been closed and quietly cache a fresh client that nobody ever closes.
+        Cancelling is safe rather than leaky because both prefetch stages close their own client
+        if they are interrupted before it reaches the cache.
         """
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        # Snapshot once: the done callbacks mutate the set as the tasks finish
+        tasks = tuple(self._prefetch_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        async with self._csrf_lock:
+            if self._client is not None:
+                await _close_client_quietly(self._client)
+                self._client = None
+                self._csrf_token = None
 
     async def get_profile_information(
         self,
-        client: httpx.AsyncClient,
+        client: httpx2.AsyncClient,
         username: str,
     ) -> dict[str, Any]:
         """Get the profile information of the user.
 
         Args:
-            client (httpx.Client): The HTTP client to use for making requests.
+            client (httpx2.AsyncClient): The HTTP client to use for making requests.
             username (str): The username of the user, usually their PRN/email/phone number.
 
         Returns:
@@ -287,56 +382,57 @@ class PESUAcademy:
 
         # Get a pre-fetched csrf token and client
         client, csrf_token = await self._get_client_with_csrf_token()
-        logging.debug(f"Using cached CSRF token for user={username}.")
+        # This client belongs to this request, so close it on every exit path, not just success
+        try:
+            logging.debug(f"Using cached CSRF token for user={username}.")
 
-        # Prepare the login data for auth call
-        data = {
-            "_csrf": csrf_token,
-            "j_username": username,
-            "j_password": password,
-        }
+            # Prepare the login data for auth call
+            data = {
+                "_csrf": csrf_token,
+                "j_username": username,
+                "j_password": password,
+            }
 
-        logging.debug("Attempting to authenticate user...")
-        # Make a post request to authenticate the user
-        auth_url = "https://www.pesuacademy.com/Academy/j_spring_security_check"
-        response = await client.post(auth_url, data=data)
-        soup = await asyncio.to_thread(HTMLParser, response.text)
-        logging.debug("Authentication response received.")
+            logging.debug("Attempting to authenticate user...")
+            # Make a post request to authenticate the user
+            auth_url = "https://www.pesuacademy.com/Academy/j_spring_security_check"
+            response = await client.post(auth_url, data=data)
+            soup = await asyncio.to_thread(HTMLParser, response.text)
+            logging.debug("Authentication response received.")
 
-        # If class login-form is present, login failed
-        if soup.css_first("div.login-form"):
-            # Log the error and return the error message
-            raise AuthenticationError(
-                f"Invalid username or password, or user does not exist for user={username}.",
-            )
-
-        # If the user is successfully authenticated
-        logging.info(f"Login successful for user={username}.")
-        status = True
-        # Get the newly authenticated csrf token
-        if csrf_node := soup.css_first("meta[name='csrf-token']"):
-            csrf_token = csrf_node.attributes.get("content")
-            logging.debug(f"Authenticated CSRF token: {csrf_token}")
-        else:
-            raise CSRFTokenError(
-                f"CSRF token not found in the post-authentication response for user={username}.",
-            )
-
-        result = {"status": status, "message": "Login successful."}
-
-        if profile:
-            logging.info(f"Profile data requested for user={username}. Fetching profile data...")
-            # Fetch the profile information
-            result["profile"] = await self.get_profile_information(client, username)
-            # Filter the fields if field filtering is enabled
-            if field_filtering:
-                result["profile"] = {key: value for key, value in result["profile"].items() if key in fields}
-                logging.info(
-                    f"Field filtering enabled. Filtered profile data for user={username}: {result['profile']}",
+            # If class login-form is present, login failed
+            if soup.css_first("div.login-form"):
+                # Log the error and return the error message
+                raise AuthenticationError(
+                    f"Invalid username or password, or user does not exist for user={username}.",
                 )
 
-        logging.info(f"Authentication process for user={username} completed successfully.")
+            # If the user is successfully authenticated
+            logging.info(f"Login successful for user={username}.")
+            status = True
+            # Get the newly authenticated csrf token
+            if csrf_node := soup.css_first("meta[name='csrf-token']"):
+                csrf_token = csrf_node.attributes.get("content")
+                logging.debug(f"Authenticated CSRF token: {csrf_token}")
+            else:
+                raise CSRFTokenError(
+                    f"CSRF token not found in the post-authentication response for user={username}.",
+                )
 
-        # Close the client and return the result
-        await client.aclose()
-        return result
+            result = {"status": status, "message": "Login successful."}
+
+            if profile:
+                logging.info(f"Profile data requested for user={username}. Fetching profile data...")
+                # Fetch the profile information
+                result["profile"] = await self.get_profile_information(client, username)
+                # Filter the fields if field filtering is enabled
+                if field_filtering:
+                    result["profile"] = {key: value for key, value in result["profile"].items() if key in fields}
+                    logging.info(
+                        f"Field filtering enabled. Filtered profile data for user={username}: {result['profile']}",
+                    )
+
+            logging.info(f"Authentication process for user={username} completed successfully.")
+            return result
+        finally:
+            await _close_client_quietly(client)

@@ -10,7 +10,7 @@ jobs:
     if: ${{ contains(fromJson(vars.PROD_DEPLOYMENT_ALLOWED_USERS), github.actor) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -33,7 +33,6 @@ jobs:
           git merge --ff-only origin/dev || {
             echo "❌ Fast-forward merge failed. Manual conflict resolution required."
             echo "Please ensure dev branch is ahead of main with no conflicts."
-            git merge --abort
             exit 1
           }
 
@@ -50,7 +49,7 @@ jobs:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
 
@@ -66,7 +65,7 @@ jobs:
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -91,7 +90,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
 
@@ -100,7 +99,7 @@ jobs:
         run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -126,7 +125,7 @@ jobs:
     steps:
       - name: Check Staging Deploy Hook URL
         run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }}" ]; then
+          if [ -z "$RENDER_DEPLOY_HOOK_URL_DEV" ]; then
             echo "❌ Staging deploy hook missing!"
             exit 1
           fi
@@ -134,7 +133,7 @@ jobs:
       - name: Deploy to Staging
         run: |
           echo "🚀 Deploying to Staging..."
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL_DEV }} || {
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL_DEV" || {
             echo "❌ Staging deploy failed!"
             exit 1
           }
@@ -150,7 +149,7 @@ jobs:
     steps:
       - name: Check Production Deploy Hook URL
         run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL_PROD }}" ]; then
+          if [ -z "$RENDER_DEPLOY_HOOK_URL_PROD" ]; then
             echo "❌ Production deploy hook missing!"
             exit 1
           fi
@@ -158,7 +157,7 @@ jobs:
       - name: Deploy to Production
         run: |
           echo "🚀 Deploying to Production..."
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL_PROD }} || {
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL_PROD" || {
             echo "❌ Production deploy failed!"
             exit 1
           }

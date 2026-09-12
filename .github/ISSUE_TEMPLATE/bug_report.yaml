@@ -70,7 +70,7 @@ body:
     attributes:
       label: 🧪 Runtime Environment
       description: OS, Python version, Docker/uv, etc.
-      placeholder: e.g. "PopOS 24.04, Python 3.12, uv, Docker 26.1"
+      placeholder: e.g. "PopOS 24.04, Python 3.14, uv, Docker 26.1"
     validations:
       required: true
 

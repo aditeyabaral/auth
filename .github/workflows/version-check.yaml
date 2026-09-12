@@ -1,0 +1,32 @@
+name: Version Check
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  # Every pull request must raise the project version, so that what is deployed is identifiable
+  version-bumped:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history so the base commit's pyproject.toml can be read
+          fetch-depth: 0
+
+      - name: Verify the project version was bumped
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git show "$BASE_SHA:pyproject.toml" > /tmp/base_pyproject.toml
+          git show "$BASE_SHA:uv.lock" > /tmp/base_uv.lock
+          python3 .github/scripts/check_version_bump.py \
+            --base-pyproject /tmp/base_pyproject.toml \
+            --head-pyproject pyproject.toml \
+            --head-lock uv.lock \
+            --base-ref "$BASE_REF"
