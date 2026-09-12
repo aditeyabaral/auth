@@ -744,3 +744,40 @@ async def test_authenticate_triggers_exactly_one_prefetch(mock_fetch, pesu):
 
     # One cold-cache inline fetch for this request, one prefetch for the next. Never more.
     assert mock_fetch.await_count == 2
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._fetch_new_client_with_csrf_token")
+async def test_prefetch_closes_new_client_when_cancelled_during_cleanup(mock_fetch, pesu):
+    """A second cancellation, landing while the client is being closed, must not abandon it.
+
+    The cleanup in `_prefetch_client_with_csrf_token` runs from an `except BaseException` handler,
+    so it is already unwinding from one cancellation when a shutdown can cancel it again. Without
+    shielding, that second cancellation stops `aclose()` part-way and leaks the connection pool.
+    """
+    close_started = asyncio.Event()
+    close_finished = asyncio.Event()
+
+    async def slow_aclose():
+        close_started.set()
+        await asyncio.sleep(0.05)
+        close_finished.set()
+
+    new_client = AsyncMock()
+    new_client.aclose.side_effect = slow_aclose
+    mock_fetch.return_value = (new_client, "fresh-token")
+
+    # Hold the lock so the prefetch blocks at the swap, exactly as it would during shutdown
+    await pesu._csrf_lock.acquire()
+    task = asyncio.create_task(pesu._prefetch_client_with_csrf_token())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    # Wait until the close is genuinely in flight, then cancel again on top of it
+    await asyncio.wait_for(close_started.wait(), timeout=1)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    pesu._csrf_lock.release()
+
+    await asyncio.wait_for(close_finished.wait(), timeout=1)
+    new_client.aclose.assert_awaited_once()
+    assert pesu._client is None

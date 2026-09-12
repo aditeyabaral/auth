@@ -31,12 +31,17 @@ ProfileField = Literal[
 ]
 
 
-async def _close_client_quietly(client: httpx.AsyncClient) -> None:
+# Strong references to in-flight client closes. A close that outlives the coroutine which asked
+# for it (see _close_client_quietly) would otherwise be a bare task, free to be garbage collected
+# mid-flight. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+_CLOSE_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _aclose_client(client: httpx.AsyncClient) -> None:
     """Close an HTTP client, logging rather than raising if the close itself fails.
 
     Cleanup failure must never replace the error that triggered the cleanup: letting `aclose()`
-    propagate out of a `finally` would turn a routine 401 into a 500. `CancelledError` is not
-    caught, since cancellation still has to propagate.
+    propagate out of a `finally` would turn a routine 401 into a 500.
 
     Args:
         client (httpx.AsyncClient): The client to close.
@@ -45,6 +50,25 @@ async def _close_client_quietly(client: httpx.AsyncClient) -> None:
         await client.aclose()
     except Exception:
         logging.warning("Failed to close an HTTP client cleanly.", exc_info=True)
+
+
+async def _close_client_quietly(client: httpx.AsyncClient) -> None:
+    """Close an HTTP client, surviving both a failing close and a cancellation mid-close.
+
+    Most callers run this from an `except BaseException` handler or a `finally`, which is exactly
+    where a *second* cancellation can land -- a shutdown cancelling a task that is already
+    unwinding from its first cancellation. A plain `await client.aclose()` there is abandoned
+    part-way and the connection pool is never released, which is the leak this whole helper
+    exists to prevent. Shielding the close lets it run to completion in its own task while the
+    `CancelledError` still propagates to the caller, so cancellation semantics are unchanged.
+
+    Args:
+        client (httpx.AsyncClient): The client to close.
+    """
+    task = asyncio.ensure_future(_aclose_client(client))
+    _CLOSE_TASKS.add(task)
+    task.add_done_callback(_CLOSE_TASKS.discard)
+    await asyncio.shield(task)
 
 
 class PESUAcademy:
@@ -248,7 +272,7 @@ class PESUAcademy:
         """Get the profile information of the user.
 
         Args:
-            client (httpx.Client): The HTTP client to use for making requests.
+            client (httpx.AsyncClient): The HTTP client to use for making requests.
             username (str): The username of the user, usually their PRN/email/phone number.
 
         Returns:
