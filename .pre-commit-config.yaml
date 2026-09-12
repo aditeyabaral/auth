@@ -35,3 +35,7 @@ repos:
         language: system
         types: [ python ]
         pass_filenames: false
+        # Print the run even when it passes. Without this pre-commit swallows the output, so the
+        # test counts, the coverage total and the "live tests skipped" warning were all invisible
+        # in CI -- a partial run looked identical to a full one.
+        verbose: true
