@@ -1,0 +1,149 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi import APIRouter
+from fastapi.testclient import TestClient
+
+from app.app import app
+from app.exceptions.authentication import AuthenticationError
+from app.metrics.collector import MetricsCollector
+from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE
+
+boom_router = APIRouter()
+
+
+@boom_router.get("/raiseUnhandledForMetrics")
+async def raise_unhandled():
+    raise RuntimeError("Simulated internal server error")
+
+
+app.include_router(boom_router)
+
+
+@pytest.fixture
+def client(monkeypatch):
+    """A client with a *fresh* collector.
+
+    The collector is a module-level singleton shared by the whole session, so any test asserting an
+    absolute count without this is order-dependent -- and tests/conftest.py forces a fixed directory
+    order, which would make such a bug look stable locally and fail elsewhere.
+    """
+    monkeypatch.setattr("app.app.metrics", MetricsCollector())
+    with (
+        patch("app.app.pesu_academy.prefetch_client_with_csrf_token", new_callable=AsyncMock),
+        patch("app.app.pesu_academy.close_client", new_callable=AsyncMock),
+    ):
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            yield test_client
+
+
+def test_prometheus_endpoint_content_type(client):
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == PROMETHEUS_CONTENT_TYPE
+
+
+def test_prometheus_endpoint_declares_every_family(client):
+    body = client.get("/metrics").text
+    assert "# HELP pesu_auth_requests_total HTTP requests received.\n" in body
+    assert "# TYPE pesu_auth_request_latency_seconds summary\n" in body
+    assert body.endswith("\n")
+
+
+def test_json_endpoint_shape(client):
+    body = client.get("/metrics.json").json()
+    assert set(body) == {
+        "startTimeSeconds",
+        "uptimeSeconds",
+        "requests",
+        "latency",
+        "authentication",
+        "responsesByStatus",
+        "requestsByRoute",
+        "errorsByType",
+    }
+
+
+def test_a_request_is_reflected_in_both_views(client):
+    client.get("/health")
+    assert 'pesu_auth_route_requests_total{method="GET",route="/health"} 1' in client.get("/metrics").text
+    assert "GET /health" in client.get("/metrics.json").json()["requestsByRoute"]
+
+
+def test_a_successful_request_is_counted_as_success(client):
+    client.get("/health")
+    body = client.get("/metrics.json").json()
+    assert body["responsesByStatus"]["200"] >= 1
+    assert body["requests"]["failed"] == 0
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_an_authentication_request_records_the_profile_split(mock_authenticate, client):
+    mock_authenticate.return_value = {"status": True, "message": "Login successful."}
+    client.post("/authenticate", json={"username": "u", "password": "p", "profile": True})
+    client.post("/authenticate", json={"username": "u", "password": "p", "profile": False})
+    authentication = client.get("/metrics.json").json()["authentication"]
+    assert authentication == {"total": 2, "withProfile": 1, "withoutProfile": 1}
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_a_failed_authentication_records_both_status_and_error_type(mock_authenticate, client):
+    """The whole point of the middleware/handler split: a 401 keeps its status *and* its class."""
+    mock_authenticate.side_effect = AuthenticationError()
+    assert client.post("/authenticate", json={"username": "u", "password": "p"}).status_code == 401
+    body = client.get("/metrics.json").json()
+    assert body["responsesByStatus"]["401"] == 1
+    assert body["errorsByType"]["AuthenticationError"] == 1
+    assert body["requests"]["failed"] == 1
+
+
+def test_a_validation_error_records_its_type(client):
+    assert client.post("/authenticate", json={"password": "p"}).status_code == 400
+    body = client.get("/metrics.json").json()
+    assert body["responsesByStatus"]["400"] == 1
+    assert body["errorsByType"]["RequestValidationError"] == 1
+
+
+def test_an_unhandled_exception_records_a_500(client):
+    """ServerErrorMiddleware sits above the middleware, so this path cannot be verified by reading
+    the code -- only by driving a real unhandled exception through the whole stack."""
+    assert client.get("/raiseUnhandledForMetrics").status_code == 500
+    body = client.get("/metrics.json").json()
+    assert body["responsesByStatus"]["500"] == 1
+    assert body["errorsByType"]["RuntimeError"] == 1
+    assert body["requests"]["failed"] == 1
+
+
+def test_an_unknown_path_is_bucketed(client):
+    """A 404 is counted, attributed to one bucket, and runs no handler of ours."""
+    assert client.get("/definitely-not-a-route").status_code == 404
+    body = client.get("/metrics.json").json()
+    assert body["responsesByStatus"]["404"] == 1
+    assert "GET <unmatched>" in body["requestsByRoute"]
+    assert body["errorsByType"] == {}
+
+
+def test_the_metrics_endpoint_counts_itself(client):
+    """Scrapes are deliberately not excluded: excluding them would break the accounting invariant."""
+    client.get("/metrics.json")
+    assert "GET /metrics.json" in client.get("/metrics.json").json()["requestsByRoute"]
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_response_and_outcome_counts_agree(mock_authenticate, client):
+    """sum(responsesByStatus) == success + failed, and sum(errorsByType) <= failed."""
+    mock_authenticate.side_effect = AuthenticationError()
+    client.get("/health")
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+    client.get("/definitely-not-a-route")
+    body = client.get("/metrics.json").json()
+    resolved = body["requests"]["success"] + body["requests"]["failed"]
+    assert sum(body["responsesByStatus"].values()) == resolved
+    assert sum(body["errorsByType"].values()) < body["requests"]["failed"]
+
+
+def test_latency_is_recorded_for_a_route(client):
+    client.get("/health")
+    route = client.get("/metrics.json").json()["requestsByRoute"]["GET /health"]
+    assert route["latency"]["count"] == 1
+    assert route["latency"]["averageSeconds"] >= 0

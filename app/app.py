@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -25,11 +25,12 @@ if TYPE_CHECKING:
 
 from pydantic import ValidationError
 
-from app.docs import authenticate_docs, health_docs, readme_docs
+from app.docs import authenticate_docs, health_docs, metrics_docs, metrics_json_docs, readme_docs
 from app.exceptions.base import PESUAcademyError
 from app.metrics import AUTHENTICATION_REQUESTS, ERRORS_BY_TYPE, MetricsCollector
 from app.metrics.middleware import record_request_metrics
-from app.models import RequestModel, ResponseModel
+from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE, render_prometheus
+from app.models import MetricsModel, RequestModel, ResponseModel
 from app.pesu import PESUAcademy
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -190,6 +191,34 @@ async def health() -> JSONResponse:
             "timestamp": datetime.datetime.now(IST).isoformat(),
         },
     )
+
+
+@app.get(
+    "/metrics",
+    response_class=PlainTextResponse,
+    responses=metrics_docs.response_examples,
+    tags=["Monitoring"],
+)
+async def prometheus_metrics() -> PlainTextResponse:
+    """Expose the collected metrics in the Prometheus text exposition format."""
+    return PlainTextResponse(
+        content=render_prometheus(metrics.snapshot()),
+        media_type=PROMETHEUS_CONTENT_TYPE,
+    )
+
+
+@app.get(
+    "/metrics.json",
+    response_model=MetricsModel,
+    response_class=JSONResponse,
+    responses=metrics_json_docs.response_examples,
+    tags=["Monitoring"],
+)
+async def json_metrics() -> MetricsModel:
+    """Expose the collected metrics as JSON."""
+    # Returned as a model rather than a JSONResponse, so FastAPI serializes it with by_alias=True
+    # and the camelCase keys come for free.
+    return MetricsModel.from_snapshot(metrics.snapshot())
 
 
 @app.get(
