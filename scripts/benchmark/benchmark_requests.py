@@ -40,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--route",
         type=str,
-        choices=["authenticate", "health", "readme", "metrics", "metrics.json"],
+        choices=["authenticate", "health", "readme", "metrics"],
         default="authenticate",
         help="The route to make the request to (default: authenticate)",
     )

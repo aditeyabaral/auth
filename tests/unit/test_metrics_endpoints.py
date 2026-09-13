@@ -50,8 +50,8 @@ def test_prometheus_endpoint_declares_every_family(client):
     assert body.endswith("\n")
 
 
-def test_json_endpoint_shape(client):
-    body = client.get("/metrics.json").json()
+def test_json_format_shape(client):
+    body = client.get("/metrics?fmt=json").json()
     assert set(body) == {
         "startTimeSeconds",
         "uptimeSeconds",
@@ -67,12 +67,12 @@ def test_json_endpoint_shape(client):
 def test_a_request_is_reflected_in_both_views(client):
     client.get("/health")
     assert 'pesu_auth_route_requests_total{method="GET",route="/health"} 1' in client.get("/metrics").text
-    assert "GET /health" in client.get("/metrics.json").json()["requestsByRoute"]
+    assert "GET /health" in client.get("/metrics?fmt=json").json()["requestsByRoute"]
 
 
 def test_a_successful_request_is_counted_as_success(client):
     client.get("/health")
-    body = client.get("/metrics.json").json()
+    body = client.get("/metrics?fmt=json").json()
     assert body["responsesByStatus"]["200"] >= 1
     assert body["requests"]["failed"] == 0
 
@@ -82,7 +82,7 @@ def test_an_authentication_request_records_the_profile_split(mock_authenticate, 
     mock_authenticate.return_value = {"status": True, "message": "Login successful."}
     client.post("/authenticate", json={"username": "u", "password": "p", "profile": True})
     client.post("/authenticate", json={"username": "u", "password": "p", "profile": False})
-    authentication = client.get("/metrics.json").json()["authentication"]
+    authentication = client.get("/metrics?fmt=json").json()["authentication"]
     assert authentication == {"total": 2, "withProfile": 1, "withoutProfile": 1}
 
 
@@ -91,7 +91,7 @@ def test_a_failed_authentication_records_both_status_and_error_type(mock_authent
     """The whole point of the middleware/handler split: a 401 keeps its status *and* its class."""
     mock_authenticate.side_effect = AuthenticationError()
     assert client.post("/authenticate", json={"username": "u", "password": "p"}).status_code == 401
-    body = client.get("/metrics.json").json()
+    body = client.get("/metrics?fmt=json").json()
     assert body["responsesByStatus"]["401"] == 1
     assert body["errorsByType"]["AuthenticationError"] == 1
     assert body["requests"]["failed"] == 1
@@ -99,7 +99,7 @@ def test_a_failed_authentication_records_both_status_and_error_type(mock_authent
 
 def test_a_validation_error_records_its_type(client):
     assert client.post("/authenticate", json={"password": "p"}).status_code == 400
-    body = client.get("/metrics.json").json()
+    body = client.get("/metrics?fmt=json").json()
     assert body["responsesByStatus"]["400"] == 1
     assert body["errorsByType"]["RequestValidationError"] == 1
 
@@ -108,7 +108,7 @@ def test_an_unhandled_exception_records_a_500(client):
     """ServerErrorMiddleware sits above the middleware, so this path cannot be verified by reading
     the code -- only by driving a real unhandled exception through the whole stack."""
     assert client.get("/raiseUnhandledForMetrics").status_code == 500
-    body = client.get("/metrics.json").json()
+    body = client.get("/metrics?fmt=json").json()
     assert body["responsesByStatus"]["500"] == 1
     assert body["errorsByType"]["RuntimeError"] == 1
     assert body["requests"]["failed"] == 1
@@ -117,7 +117,7 @@ def test_an_unhandled_exception_records_a_500(client):
 def test_an_unknown_path_is_bucketed(client):
     """A 404 is counted, attributed to one bucket, and runs no handler of ours."""
     assert client.get("/definitely-not-a-route").status_code == 404
-    body = client.get("/metrics.json").json()
+    body = client.get("/metrics?fmt=json").json()
     assert body["responsesByStatus"]["404"] == 1
     assert "GET <unmatched>" in body["requestsByRoute"]
     assert body["errorsByType"] == {}
@@ -125,8 +125,26 @@ def test_an_unknown_path_is_bucketed(client):
 
 def test_the_metrics_endpoint_counts_itself(client):
     """Scrapes are deliberately not excluded: excluding them would break the accounting invariant."""
-    client.get("/metrics.json")
-    assert "GET /metrics.json" in client.get("/metrics.json").json()["requestsByRoute"]
+    client.get("/metrics?fmt=json")
+    assert "GET /metrics" in client.get("/metrics?fmt=json").json()["requestsByRoute"]
+
+
+def test_the_default_format_is_prometheus(client):
+    """A scraper hitting this path bare must get the exposition format, not JSON."""
+    assert client.get("/metrics").headers["content-type"] == PROMETHEUS_CONTENT_TYPE
+
+
+def test_both_formats_are_served_from_one_path(client):
+    assert client.get("/metrics?fmt=prometheus").headers["content-type"] == PROMETHEUS_CONTENT_TYPE
+    assert client.get("/metrics?fmt=json").headers["content-type"].startswith("application/json")
+
+
+def test_an_unrecognised_format_is_rejected(client):
+    """Goes through the existing validation handler, so it is a 400 and is itself counted."""
+    response = client.get("/metrics?fmt=xml")
+    assert response.status_code == 400
+    assert "fmt" in response.json()["message"]
+    assert client.get("/metrics?fmt=json").json()["errorsByType"]["RequestValidationError"] == 1
 
 
 @patch("app.app.pesu_academy.authenticate")
@@ -136,7 +154,7 @@ def test_response_and_outcome_counts_agree(mock_authenticate, client):
     client.get("/health")
     client.post("/authenticate", json={"username": "u", "password": "p"})
     client.get("/definitely-not-a-route")
-    body = client.get("/metrics.json").json()
+    body = client.get("/metrics?fmt=json").json()
     resolved = body["requests"]["success"] + body["requests"]["failed"]
     assert sum(body["responsesByStatus"].values()) == resolved
     assert sum(body["errorsByType"].values()) < body["requests"]["failed"]
@@ -144,6 +162,6 @@ def test_response_and_outcome_counts_agree(mock_authenticate, client):
 
 def test_latency_is_recorded_for_a_route(client):
     client.get("/health")
-    route = client.get("/metrics.json").json()["requestsByRoute"]["GET /health"]
+    route = client.get("/metrics?fmt=json").json()["requestsByRoute"]["GET /health"]
     assert route["latency"]["count"] == 1
     assert route["latency"]["averageSeconds"] >= 0

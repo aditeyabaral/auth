@@ -25,11 +25,11 @@ if TYPE_CHECKING:
 
 from pydantic import ValidationError
 
-from app.docs import authenticate_docs, health_docs, metrics_docs, metrics_json_docs, readme_docs
+from app.docs import authenticate_docs, health_docs, metrics_docs, readme_docs
 from app.exceptions.base import PESUAcademyError
 from app.metrics import AUTHENTICATION_REQUESTS, ERRORS_BY_TYPE, MetricsCollector
 from app.metrics.middleware import record_request_metrics
-from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE, render_prometheus
+from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE, MetricsFormat, render_prometheus
 from app.models import MetricsModel, RequestModel, ResponseModel
 from app.pesu import PESUAcademy
 
@@ -195,30 +195,30 @@ async def health() -> JSONResponse:
 
 @app.get(
     "/metrics",
-    response_class=PlainTextResponse,
+    # The response type depends on ?fmt, so it cannot be declared once. Both shapes are documented
+    # in responses= instead, which is what Swagger renders anyway.
+    response_model=None,
     responses=metrics_docs.response_examples,
     tags=["Monitoring"],
 )
-async def prometheus_metrics() -> PlainTextResponse:
-    """Expose the collected metrics in the Prometheus text exposition format."""
+async def metrics_endpoint(fmt: MetricsFormat = MetricsFormat.PROMETHEUS) -> Response:
+    """Expose the collected metrics.
+
+    Query parameters:
+    - fmt (str, optional): `prometheus` for the text exposition format (the default, since that is
+      what a scraper expects from this path), or `json` for the same counters as JSON.
+    """
+    snapshot = metrics.snapshot()
+    if fmt is MetricsFormat.JSON:
+        # by_alias so the keys are camelCase like every other response this API returns
+        return JSONResponse(
+            status_code=200,
+            content=MetricsModel.from_snapshot(snapshot).model_dump(by_alias=True),
+        )
     return PlainTextResponse(
-        content=render_prometheus(metrics.snapshot()),
+        content=render_prometheus(snapshot),
         media_type=PROMETHEUS_CONTENT_TYPE,
     )
-
-
-@app.get(
-    "/metrics.json",
-    response_model=MetricsModel,
-    response_class=JSONResponse,
-    responses=metrics_json_docs.response_examples,
-    tags=["Monitoring"],
-)
-async def json_metrics() -> MetricsModel:
-    """Expose the collected metrics as JSON."""
-    # Returned as a model rather than a JSONResponse, so FastAPI serializes it with by_alias=True
-    # and the camelCase keys come for free.
-    return MetricsModel.from_snapshot(metrics.snapshot())
 
 
 @app.get(

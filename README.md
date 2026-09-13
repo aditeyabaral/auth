@@ -102,8 +102,7 @@ The API provides multiple endpoints for authentication, documentation, and monit
 | `/`             | `GET`      | Serves the interactive API documentation (Swagger UI). |
 | `/authenticate` | `POST`     | Authenticates a user using their PESU credentials.     |
 | `/health`       | `GET`      | A health check endpoint to monitor the API's status.   |
-| `/metrics`      | `GET`      | Exposes traffic and error counters for Prometheus.     |
-| `/metrics.json` | `GET`      | The same counters as JSON, for reading by hand.        |
+| `/metrics`      | `GET`      | Exposes traffic and error counters. See `fmt` below.   |
 | `/readme`       | `GET`      | Redirects to the project's official GitHub repository. |
 
 ### `/authenticate`
@@ -168,8 +167,8 @@ does not take any request parameters.
 ### `/metrics`
 
 This endpoint exposes counters describing the traffic this process has served, in the
-[Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/), ready to be scraped.
-It takes no request parameters.
+[Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/) by default, ready
+to be scraped, or as JSON with `?fmt=json`.
 
 ```
 # HELP pesu_auth_responses_total HTTP responses, by status code.
@@ -186,11 +185,13 @@ Status codes and exception classes are recorded separately, so errors that share
 Requests to `/metrics` are themselves counted. Excluding them would mean the endpoint reported a request total that did
 not match the sum of its own response counts.
 
-### `/metrics.json`
+#### Query Parameters
 
-The same counters as JSON, for reading by hand rather than by a scraper. It takes no request parameters.
+| **Field** | **Type** | **Description**                                                                        |
+| --------- | -------- | -------------------------------------------------------------------------------------- |
+| `fmt`     | `str`    | `prometheus` (default) for the text exposition format, or `json` for the same counters |
 
-#### Response Object
+#### Response Object (`fmt=json`)
 
 | **Field**           | **Type** | **Description**                                                            |
 | ------------------- | -------- | -------------------------------------------------------------------------- |

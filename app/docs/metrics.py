@@ -1,7 +1,7 @@
-"""Custom docs for the /metrics and /metrics.json PESUAuth endpoints."""
+"""Custom docs for the /metrics PESUAuth endpoint."""
 
 from app.docs.base import ApiDocs
-from app.models import MetricsModel, ResponseModel
+from app.models import ResponseModel
 
 _INTERNAL_SERVER_ERROR = {
     "description": "Internal Server Error.",
@@ -33,39 +33,43 @@ pesu_auth_request_latency_seconds_sum 742.1841932
 pesu_auth_request_latency_seconds_count 1284
 """
 
+_JSON_EXAMPLE = {
+    "startTimeSeconds": 1757660400.12,
+    "uptimeSeconds": 3612.44,
+    "requests": {"total": 1284, "success": 1102, "failed": 182},
+    "latency": {"sumSeconds": 742.1841932, "count": 1284, "averageSeconds": 0.5779},
+    "authentication": {"total": 774, "withProfile": 134, "withoutProfile": 640},
+    "responsesByStatus": {"200": 1094, "401": 160, "502": 6},
+    "requestsByRoute": {
+        "POST /authenticate": {
+            "requests": 774,
+            "latency": {"sumSeconds": 741.2118, "count": 774, "averageSeconds": 0.9576},
+        }
+    },
+    "errorsByType": {"AuthenticationError": 160, "RequestValidationError": 12},
+}
+
 metrics_docs = ApiDocs(
     request_examples={},
     response_examples={
         200: {
-            "description": "Metrics in the Prometheus text exposition format.",
-            "content": {"text/plain": {"example": _PROMETHEUS_EXAMPLE}},
+            "description": "The collected metrics, in the format named by `fmt`.",
+            "content": {
+                "text/plain": {"example": _PROMETHEUS_EXAMPLE},
+                "application/json": {"example": _JSON_EXAMPLE},
+            },
         },
-        500: _INTERNAL_SERVER_ERROR,
-    },
-)
-
-metrics_json_docs = ApiDocs(
-    request_examples={},
-    response_examples={
-        200: {
-            "description": "Metrics as JSON.",
-            "model": MetricsModel,
+        400: {
+            "description": "Unrecognised value for `fmt`.",
+            "model": ResponseModel,
             "content": {
                 "application/json": {
                     "example": {
-                        "startTimeSeconds": 1757660400.12,
-                        "uptimeSeconds": 3612.44,
-                        "requests": {"total": 1284, "success": 1102, "failed": 182},
-                        "latency": {"sumSeconds": 742.1841932, "count": 1284, "averageSeconds": 0.5779},
-                        "authentication": {"total": 774, "withProfile": 134, "withoutProfile": 640},
-                        "responsesByStatus": {"200": 1094, "401": 160, "502": 6},
-                        "requestsByRoute": {
-                            "POST /authenticate": {
-                                "requests": 774,
-                                "latency": {"sumSeconds": 741.2118, "count": 774, "averageSeconds": 0.9576},
-                            }
-                        },
-                        "errorsByType": {"AuthenticationError": 160, "RequestValidationError": 12},
+                        "status": False,
+                        "message": (
+                            "Could not validate request data - query.fmt: Input should be 'prometheus' or 'json'"
+                        ),
+                        "timestamp": "2024-07-28T22:30:10.103368+05:30",
                     }
                 }
             },

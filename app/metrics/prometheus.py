@@ -1,7 +1,8 @@
-"""Render a metrics snapshot in the Prometheus text exposition format."""
+"""Exposition of a metrics snapshot: the formats on offer, and the Prometheus renderer."""
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from app.metrics.collector import FAMILIES
@@ -14,6 +15,14 @@ if TYPE_CHECKING:
 # Prometheus requires this exact media type for the 0.0.4 text format. The version parameter is not
 # optional: a scraper handed a bare "text/plain" falls back to guessing the format.
 PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+
+class MetricsFormat(StrEnum):
+    """The representations the metrics endpoint can serve."""
+
+    PROMETHEUS = "prometheus"
+    JSON = "json"
+
 
 # Label values are double-quoted, so a backslash, a quote or a newline inside one has to be escaped
 # or the sample line stops parsing. Everything else, including UTF-8, passes through.
