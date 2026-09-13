@@ -3,7 +3,7 @@
 import os
 import time
 
-import httpx
+import httpx2
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,7 +26,7 @@ def make_request(
     Returns:
         Tuple of response JSON and elapsed time in seconds
     """
-    with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(timeout)) as client:
+    with httpx2.Client(follow_redirects=True, timeout=httpx2.Timeout(timeout)) as client:
         if route == "authenticate":
             data = {
                 "username": os.getenv("TEST_PRN"),
