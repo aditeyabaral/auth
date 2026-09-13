@@ -102,6 +102,8 @@ The API provides multiple endpoints for authentication, documentation, and monit
 | `/`             | `GET`      | Serves the interactive API documentation (Swagger UI). |
 | `/authenticate` | `POST`     | Authenticates a user using their PESU credentials.     |
 | `/health`       | `GET`      | A health check endpoint to monitor the API's status.   |
+| `/metrics`      | `GET`      | Exposes traffic and error counters for Prometheus.     |
+| `/metrics.json` | `GET`      | The same counters as JSON, for reading by hand.        |
 | `/readme`       | `GET`      | Redirects to the project's official GitHub repository. |
 
 ### `/authenticate`
@@ -162,6 +164,47 @@ does not take any request parameters.
 | `status`    | `boolean`  | `true` if healthy, `false` if there was an error                    |
 | `message`   | `str`      | "ok" if healthy, error message otherwise                            |
 | `timestamp` | `datetime` | A timezone offset timestamp indicating the time of the health check |
+
+### `/metrics`
+
+This endpoint exposes counters describing the traffic this process has served, in the
+[Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/), ready to be scraped.
+It takes no request parameters.
+
+```
+# HELP pesu_auth_responses_total HTTP responses, by status code.
+# TYPE pesu_auth_responses_total counter
+pesu_auth_responses_total{status="200"} 1094
+pesu_auth_responses_total{status="401"} 160
+```
+
+The counters live in memory and **reset when the process restarts**, which is why
+`pesu_auth_process_start_time_seconds` is exposed: without it a dashboard cannot tell a restart from a drop in traffic.
+Status codes and exception classes are recorded separately, so errors that share a status code — `CSRFTokenError` and
+`ProfileFetchError` are both `502` — stay distinguishable.
+
+Requests to `/metrics` are themselves counted. Excluding them would mean the endpoint reported a request total that did
+not match the sum of its own response counts.
+
+### `/metrics.json`
+
+The same counters as JSON, for reading by hand rather than by a scraper. It takes no request parameters.
+
+#### Response Object
+
+| **Field**           | **Type** | **Description**                                                            |
+| ------------------- | -------- | -------------------------------------------------------------------------- |
+| `startTimeSeconds`  | `float`  | Start time of this process since the Unix epoch. Counters reset on restart |
+| `uptimeSeconds`     | `float`  | Seconds since this process started collecting                              |
+| `requests`          | `object` | `total`, `success` and `failed` request counts                             |
+| `latency`           | `object` | `sumSeconds`, `count` and `averageSeconds` until a response starts         |
+| `authentication`    | `object` | `total`, `withProfile` and `withoutProfile` authentication request counts  |
+| `responsesByStatus` | `object` | Response counts keyed by HTTP status code                                  |
+| `requestsByRoute`   | `object` | Per-route requests and latency, keyed by `"METHOD route-template"`         |
+| `errorsByType`      | `object` | Error counts keyed by exception class name                                 |
+
+`requests.total` counts a request on arrival while the outcome is recorded on completion, so `total` can briefly exceed
+`success + failed` while requests are in flight.
 
 ### `/readme`
 

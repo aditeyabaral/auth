@@ -19,6 +19,7 @@ your development environment and contributing to the project.
   - [Linting & Formatting](#linting--formatting)
 - [🧪 Running Tests](#-running-tests)
   - [Tests that need credentials](#tests-that-need-credentials)
+  - [Benchmark output](#benchmark-output)
   - [Writing Tests](#writing-tests)
 - [🚀 Submitting Changes](#-submitting-changes)
   - [🔀 Create a Branch](#-create-a-branch)
@@ -181,6 +182,19 @@ In CI, pull requests come from forks, and GitHub withholds secrets from fork pul
 *Pre-Commit Checks* runs the reduced suite on every pull request -- it says so in the run's summary
 -- and the live tests only run once the change reaches `dev`. Run them locally before you open a
 pull request; CI will not cover them for you.
+
+### Benchmark output
+
+The scripts in `scripts/benchmark/` write their CSVs and plots to `benchmark/results/` at the
+repository root, named `{script}_{date}_{time}.{ext}`. Pass `--output-dir` to write elsewhere,
+`--tag` to label an experimental run, or `--output` to name one file explicitly. All of it is
+gitignored.
+
+```bash
+cd scripts/benchmark
+uv run python benchmark_requests.py --num-requests 100 --parallel --tag baseline
+uv run python analyze_benchmark.py -f ../../benchmark/results/benchmark_requests_*.csv
+```
 
 ### Writing Tests
 
