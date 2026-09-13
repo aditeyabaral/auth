@@ -6,8 +6,10 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from app.metrics.collector import (
+    FAILURES_BY_FAULT,
     REQUEST_LATENCY,
     REQUESTS_FAILED,
+    REQUESTS_IN_FLIGHT,
     REQUESTS_SUCCESS,
     REQUESTS_TOTAL,
     RESPONSES_BY_STATUS,
@@ -30,6 +32,8 @@ FAILURE_STATUS = 400
 # What an exception that reached us is recorded as. ServerErrorMiddleware renders the actual 500
 # above us, so we never see that response and have to record the status ourselves.
 EXCEPTION_STATUS = 500
+# At or above this status the fault is ours (or the upstream's) rather than the caller's
+SERVER_FAULT_STATUS = 500
 
 KNOWN_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 UNMATCHED_ROUTE = "<unmatched>"
@@ -92,6 +96,12 @@ def _record_outcome(collector: MetricsCollector, scope: Mapping[str, Any], statu
     else:
         collector.increment(REQUESTS_FAILED)
     collector.increment(RESPONSES_BY_STATUS, status=str(status))
+    if status >= FAILURE_STATUS:
+        # Who should act on this: a 4xx means the caller sent something wrong, a 5xx means we or
+        # PESU Academy did. Derivable from the status codes, but stated outright so an alert can
+        # fire on "our fault" without enumerating every status.
+        fault = "server" if status >= SERVER_FAULT_STATUS else "client"
+        collector.increment(FAILURES_BY_FAULT, fault=fault)
     collector.increment(ROUTE_REQUESTS, method=method, route=route)
     collector.observe(REQUEST_LATENCY, latency)
     collector.observe(ROUTE_LATENCY, latency, method=method, route=route)
@@ -116,6 +126,7 @@ async def record_request_metrics(
         Exception: Re-raised unchanged, so error handling above is unaffected.
     """
     collector.increment(REQUESTS_TOTAL)
+    collector.increment(REQUESTS_IN_FLIGHT)
     # perf_counter, not time(): a wall clock is not monotonic, and one NTP step backwards would
     # poison a cumulative latency sum permanently.
     started = time.perf_counter()
@@ -132,7 +143,9 @@ async def record_request_metrics(
         # The exception *type* is recorded by the exception handlers, not here. The two layers write
         # to different families on purpose: one failed request produces exactly one status sample
         # and exactly one error sample, never two of either.
+        collector.increment(REQUESTS_IN_FLIGHT, -1.0)
         _record_outcome(collector, request.scope, EXCEPTION_STATUS, time.perf_counter() - started)
         raise
+    collector.increment(REQUESTS_IN_FLIGHT, -1.0)
     _record_outcome(collector, request.scope, response.status_code, time.perf_counter() - started)
     return response

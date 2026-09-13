@@ -111,3 +111,57 @@ def test_average_seconds_is_present_and_null_rather_than_omitted(collector):
     """Consumers get a stable shape: the key exists on a fresh process rather than appearing later."""
     dumped = MetricsModel.from_snapshot(collector.snapshot()).model_dump(by_alias=True)
     assert dumped["latency"]["averageSeconds"] is None
+
+
+def test_upstream_operations_are_grouped(collector):
+    """Calls, failures, latency and upstream status codes gather under one key per operation."""
+    from app.metrics.collector import UPSTREAM_LATENCY, UPSTREAM_REQUESTS, UPSTREAM_RESPONSES
+
+    collector.increment(UPSTREAM_REQUESTS, operation="login", outcome="success")
+    collector.increment(UPSTREAM_REQUESTS, operation="login", outcome="error")
+    collector.increment(UPSTREAM_RESPONSES, operation="login", status="200")
+    collector.observe(UPSTREAM_LATENCY, 0.4, operation="login")
+    collector.increment(UPSTREAM_REQUESTS, operation="csrf_fetch", outcome="success")
+
+    upstream = MetricsModel.from_snapshot(collector.snapshot()).upstream
+    assert set(upstream) == {"login", "csrf_fetch"}
+    assert upstream["login"].success == 1
+    assert upstream["login"].error == 1
+    assert upstream["login"].responses_by_status == {"200": 1}
+    assert upstream["login"].latency.average_seconds == 0.4
+    # An operation that raised before any response has no status codes, and must not be dropped
+    assert upstream["csrf_fetch"].responses_by_status == {}
+    assert upstream["csrf_fetch"].error == 0
+
+
+def test_single_label_families_collapse_to_mappings(collector):
+    from app.metrics.collector import (
+        AUTHENTICATION_RESULTS,
+        CSRF_CACHE,
+        FAILURES_BY_FAULT,
+        HTTP_CLIENTS,
+        PROFILE_PARSE_ERRORS,
+        VALIDATION_ERRORS,
+    )
+
+    collector.increment(FAILURES_BY_FAULT, fault="client")
+    collector.increment(VALIDATION_ERRORS, field="username")
+    collector.increment(AUTHENTICATION_RESULTS, result="invalid_credentials")
+    collector.increment(PROFILE_PARSE_ERRORS, reason="unknown_field")
+    collector.increment(CSRF_CACHE, outcome="hit")
+    collector.increment(HTTP_CLIENTS, event="created")
+
+    model = MetricsModel.from_snapshot(collector.snapshot())
+    assert model.failures_by_fault == {"client": 1}
+    assert model.validation_errors_by_field == {"username": 1}
+    assert model.authentication_results == {"invalid_credentials": 1}
+    assert model.profile_parse_errors == {"unknown_field": 1}
+    assert model.csrf_cache == {"hit": 1}
+    assert model.http_clients == {"created": 1}
+
+
+def test_in_flight_is_reported(collector):
+    from app.metrics.collector import REQUESTS_IN_FLIGHT
+
+    collector.increment(REQUESTS_IN_FLIGHT)
+    assert MetricsModel.from_snapshot(collector.snapshot()).requests_in_flight == 1

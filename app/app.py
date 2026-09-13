@@ -26,8 +26,22 @@ if TYPE_CHECKING:
 from pydantic import ValidationError
 
 from app.docs import authenticate_docs, health_docs, metrics_docs, readme_docs
+from app.exceptions.authentication import (
+    AuthenticationError,
+    CSRFTokenError,
+    ProfileFetchError,
+    ProfileParseError,
+)
 from app.exceptions.base import PESUAcademyError
-from app.metrics import AUTHENTICATION_REQUESTS, ERRORS_BY_TYPE, MetricsCollector
+from app.metrics import (
+    AUTHENTICATION_REQUESTS,
+    AUTHENTICATION_RESULTS,
+    CSRF_REFRESHES,
+    ERRORS_BY_TYPE,
+    LIFESPAN_EVENTS,
+    VALIDATION_ERRORS,
+    MetricsCollector,
+)
 from app.metrics.middleware import record_request_metrics
 from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE, MetricsFormat, render_prometheus
 from app.models import MetricsModel, RequestModel, ResponseModel
@@ -35,6 +49,17 @@ from app.pesu import PESUAcademy
 
 IST = ZoneInfo("Asia/Kolkata")
 CSRF_TOKEN_REFRESH_INTERVAL_SECONDS = 45 * 60
+# Validation failures are labelled by field, so the label set has to be closed against a caller who
+# can put anything in the request body
+KNOWN_REQUEST_FIELDS = frozenset({"username", "password", "profile", "fields", "fmt", "body"})
+# Failure vocabulary for authentication attempts. Keyed on the exception class rather than the
+# status code, because CSRFTokenError and ProfileFetchError are both 502 and mean different things.
+AUTHENTICATION_FAILURE_RESULTS = {
+    AuthenticationError: "invalid_credentials",
+    CSRFTokenError: "csrf_token_error",
+    ProfileFetchError: "profile_fetch_error",
+    ProfileParseError: "profile_parse_error",
+}
 
 
 async def _refresh_csrf_token() -> None:
@@ -50,7 +75,10 @@ async def _csrf_token_refresh_loop() -> None:
             logging.debug("Refreshing unauthenticated CSRF token...")
             await _refresh_csrf_token()
         except Exception:
+            metrics.increment(CSRF_REFRESHES, outcome="failure")
             logging.exception("Failed to refresh unauthenticated CSRF token in the background.")
+        else:
+            metrics.increment(CSRF_REFRESHES, outcome="success")
         await asyncio.sleep(CSRF_TOKEN_REFRESH_INTERVAL_SECONDS)
 
 
@@ -58,6 +86,7 @@ async def _csrf_token_refresh_loop() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Lifespan event handler for startup and shutdown events."""
     # Startup
+    metrics.increment(LIFESPAN_EVENTS, event="startup")
     logging.info("PESUAuth API startup")
 
     # Prefetch PESUAcademy client for first request
@@ -80,6 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logging.exception("Failed to cancel unauthenticated CSRF token refresh background task.")
 
     await pesu_academy.close_client()
+    metrics.increment(LIFESPAN_EVENTS, event="shutdown")
     logging.info("PESUAuth API shutdown.")
 
 
@@ -104,8 +134,8 @@ app = FastAPI(
         },
     ],
 )
-pesu_academy = PESUAcademy()
 metrics = MetricsCollector()
+pesu_academy = PESUAcademy(metrics)
 
 
 @app.middleware("http")
@@ -121,6 +151,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """Handler for request validation errors."""
     metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     errors = exc.errors()
+    # Which field was wrong, not just that something was. The field names are a fixed set, so the
+    # label is bounded; anything unrecognised collapses into one bucket rather than opening the
+    # key space to caller-controlled strings.
+    for error in errors:
+        location = error.get("loc") or ()
+        field = str(location[-1]) if location else "unknown"
+        metrics.increment(VALIDATION_ERRORS, field=field if field in KNOWN_REQUEST_FIELDS else "other")
     # Log only the shape of the failure, never the submitted values. Each entry from `errors()`
     # carries an "input" key which, for a missing required field, is the *entire request body* --
     # so logging it verbatim would write the user's password to the logs in plaintext.
@@ -265,14 +302,26 @@ async def authenticate(payload: RequestModel) -> JSONResponse:
     # already answered by route_requests_total; only the split needs the body.
     metrics.increment(AUTHENTICATION_REQUESTS, profile=str(profile).lower())
     logging.info(f"Authenticating user={username} with PESU Academy...")
-    authentication_result.update(
-        await pesu_academy.authenticate(
-            username=username,
-            password=password,
-            profile=profile,
-            fields=fields,
-        ),
-    )
+    try:
+        authentication_result.update(
+            await pesu_academy.authenticate(
+                username=username,
+                password=password,
+                profile=profile,
+                fields=fields,
+            ),
+        )
+    except PESUAcademyError as exc:
+        # Why the attempt failed, not just that it did. errors_total already counts the exception
+        # class; this records the same event in the vocabulary someone actually asks questions in --
+        # "how many logins failed because the password was wrong" versus "because PESU was broken".
+        result = AUTHENTICATION_FAILURE_RESULTS.get(type(exc), "other")
+        metrics.increment(AUTHENTICATION_RESULTS, result=result)
+        raise
+    except Exception:
+        metrics.increment(AUTHENTICATION_RESULTS, result="internal_error")
+        raise
+    metrics.increment(AUTHENTICATION_RESULTS, result="success")
 
     # Validate the response
     try:

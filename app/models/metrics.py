@@ -5,17 +5,70 @@ from pydantic.alias_generators import to_camel
 
 from app.metrics.collector import (
     AUTHENTICATION_REQUESTS,
+    AUTHENTICATION_RESULTS,
+    CSRF_CACHE,
+    CSRF_REFRESHES,
     ERRORS_BY_TYPE,
+    FAILURES_BY_FAULT,
+    HTTP_CLIENTS,
+    LIFESPAN_EVENTS,
+    PREFETCH_TASKS,
     PROCESS_START_TIME,
+    PROFILE_PARSE_ERRORS,
     REQUEST_LATENCY,
     REQUESTS_FAILED,
+    REQUESTS_IN_FLIGHT,
     REQUESTS_SUCCESS,
     REQUESTS_TOTAL,
     RESPONSES_BY_STATUS,
     ROUTE_LATENCY,
     ROUTE_REQUESTS,
+    UPSTREAM_LATENCY,
+    UPSTREAM_REQUESTS,
+    UPSTREAM_RESPONSES,
+    VALIDATION_ERRORS,
     MetricsSnapshot,
 )
+
+
+def _counts(snapshot: MetricsSnapshot, name: str, label: str) -> dict[str, int]:
+    """Collapse a single-label counter family into a plain mapping of label value to count.
+
+    Args:
+        snapshot (MetricsSnapshot): The snapshot to read.
+        name (str): The counter family name.
+        label (str): The label whose value becomes the key.
+
+    Returns:
+        dict[str, int]: The counts, keyed by label value.
+    """
+    return {labels[label]: int(value) for labels, value in snapshot.samples(name)}
+
+
+def _upstream(snapshot: MetricsSnapshot) -> dict[str, UpstreamOperationModel]:
+    """Gather the per-operation view of calls made to PESU Academy.
+
+    Args:
+        snapshot (MetricsSnapshot): The snapshot to read.
+
+    Returns:
+        dict[str, UpstreamOperationModel]: One entry per operation that has been attempted.
+    """
+    outcomes: dict[str, dict[str, int]] = {}
+    for labels, value in snapshot.samples(UPSTREAM_REQUESTS.name):
+        outcomes.setdefault(labels["operation"], {})[labels["outcome"]] = int(value)
+    statuses: dict[str, dict[str, int]] = {}
+    for labels, value in snapshot.samples(UPSTREAM_RESPONSES.name):
+        statuses.setdefault(labels["operation"], {})[labels["status"]] = int(value)
+    return {
+        operation: UpstreamOperationModel(
+            success=counts.get("success", 0),
+            error=counts.get("error", 0),
+            latency=LatencyModel.from_snapshot(snapshot, UPSTREAM_LATENCY.name, operation=operation),
+            responses_by_status=statuses.get(operation, {}),
+        )
+        for operation, counts in outcomes.items()
+    }
 
 
 class LatencyModel(BaseModel):
@@ -138,6 +191,39 @@ class RouteMetricsModel(BaseModel):
     )
 
 
+class UpstreamOperationModel(BaseModel):
+    """Model representing one kind of call made to PESU Academy."""
+
+    model_config = ConfigDict(strict=True, alias_generator=to_camel, populate_by_name=True)
+
+    success: int = Field(
+        ...,
+        title="Successful Calls",
+        description="Calls that returned without raising.",
+        json_schema_extra={"example": 1280},
+    )
+
+    error: int = Field(
+        ...,
+        title="Failed Calls",
+        description="Calls that raised, including timeouts and connection failures.",
+        json_schema_extra={"example": 4},
+    )
+
+    latency: LatencyModel = Field(
+        ...,
+        title="Upstream Latency",
+        description="Aggregate seconds spent waiting on this operation.",
+    )
+
+    responses_by_status: dict[str, int] = Field(
+        ...,
+        title="Responses by Status",
+        description="Upstream response counts keyed by HTTP status code.",
+        json_schema_extra={"example": {"200": 1280}},
+    )
+
+
 class MetricsModel(BaseModel):
     """Model representing a point-in-time view of the API's collected metrics."""
 
@@ -203,6 +289,92 @@ class MetricsModel(BaseModel):
         json_schema_extra={"example": {"AuthenticationError": 160, "RequestValidationError": 12}},
     )
 
+    requests_in_flight: int = Field(
+        ...,
+        title="Requests in Flight",
+        description="Requests received but not yet answered. Explains why total can exceed success plus failed.",
+        json_schema_extra={"example": 1},
+    )
+
+    failures_by_fault: dict[str, int] = Field(
+        ...,
+        title="Failures by Fault",
+        description='Failed requests keyed by whose fault it was: "client" for 4xx, "server" for 5xx.',
+        json_schema_extra={"example": {"client": 172, "server": 10}},
+    )
+
+    validation_errors_by_field: dict[str, int] = Field(
+        ...,
+        title="Validation Errors by Field",
+        description="Request validation failures keyed by the field that failed.",
+        json_schema_extra={"example": {"username": 8, "password": 4}},
+    )
+
+    authentication_results: dict[str, int] = Field(
+        ...,
+        title="Authentication Results",
+        description="Authentication attempts keyed by outcome, so failures can be told apart by cause.",
+        json_schema_extra={"example": {"success": 612, "invalid_credentials": 160, "profile_fetch_error": 2}},
+    )
+
+    profile_parse_errors: dict[str, int] = Field(
+        ...,
+        title="Profile Parse Errors",
+        description="Profile page parse failures keyed by what could not be parsed.",
+        json_schema_extra={"example": {"unknown_field": 3}},
+    )
+
+    upstream: dict[str, UpstreamOperationModel] = Field(
+        ...,
+        title="Upstream Calls",
+        description="Calls made to PESU Academy, keyed by operation.",
+        json_schema_extra={
+            "example": {
+                "login": {
+                    "success": 774,
+                    "error": 2,
+                    "latency": {"sumSeconds": 620.4, "count": 776, "averageSeconds": 0.7995},
+                    "responsesByStatus": {"200": 774},
+                }
+            }
+        },
+    )
+
+    csrf_cache: dict[str, int] = Field(
+        ...,
+        title="CSRF Cache",
+        description='Lookups of the prefetched CSRF client, keyed by "hit" or "miss".',
+        json_schema_extra={"example": {"hit": 760, "miss": 14}},
+    )
+
+    csrf_refreshes: dict[str, int] = Field(
+        ...,
+        title="CSRF Refreshes",
+        description="Periodic background token refreshes keyed by outcome.",
+        json_schema_extra={"example": {"success": 45, "failure": 1}},
+    )
+
+    prefetch_tasks: dict[str, int] = Field(
+        ...,
+        title="Prefetch Tasks",
+        description="Background CSRF prefetch tasks keyed by outcome.",
+        json_schema_extra={"example": {"success": 770, "failure": 4, "cancelled": 1}},
+    )
+
+    http_clients: dict[str, int] = Field(
+        ...,
+        title="HTTP Clients",
+        description="Upstream client lifecycle events. created minus closed is what is still open.",
+        json_schema_extra={"example": {"created": 776, "closed": 776}},
+    )
+
+    lifespan_events: dict[str, int] = Field(
+        ...,
+        title="Lifespan Events",
+        description="Application startup and shutdown events seen by this process.",
+        json_schema_extra={"example": {"startup": 1}},
+    )
+
     @classmethod
     def from_snapshot(cls, snapshot: MetricsSnapshot) -> MetricsModel:
         """Build the JSON metrics view from a collector snapshot.
@@ -243,4 +415,15 @@ class MetricsModel(BaseModel):
                 for labels, value in snapshot.samples(ROUTE_REQUESTS.name)
             },
             errors_by_type={labels["type"]: int(value) for labels, value in snapshot.samples(ERRORS_BY_TYPE.name)},
+            requests_in_flight=int(snapshot.value(REQUESTS_IN_FLIGHT.name)),
+            failures_by_fault=_counts(snapshot, FAILURES_BY_FAULT.name, "fault"),
+            validation_errors_by_field=_counts(snapshot, VALIDATION_ERRORS.name, "field"),
+            authentication_results=_counts(snapshot, AUTHENTICATION_RESULTS.name, "result"),
+            profile_parse_errors=_counts(snapshot, PROFILE_PARSE_ERRORS.name, "reason"),
+            upstream=_upstream(snapshot),
+            csrf_cache=_counts(snapshot, CSRF_CACHE.name, "outcome"),
+            csrf_refreshes=_counts(snapshot, CSRF_REFRESHES.name, "outcome"),
+            prefetch_tasks=_counts(snapshot, PREFETCH_TASKS.name, "outcome"),
+            http_clients=_counts(snapshot, HTTP_CLIENTS.name, "event"),
+            lifespan_events=_counts(snapshot, LIFESPAN_EVENTS.name, "event"),
         )

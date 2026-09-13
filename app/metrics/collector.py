@@ -82,6 +82,83 @@ PROCESS_START_TIME = MetricFamily(
     "Start time of the process since the Unix epoch, in seconds.",
     "gauge",
 )
+REQUESTS_IN_FLIGHT = MetricFamily(
+    f"{METRIC_PREFIX}requests_in_flight",
+    "Requests received but not yet answered.",
+    "gauge",
+)
+FAILURES_BY_FAULT = MetricFamily(
+    f"{METRIC_PREFIX}failures_total",
+    "Failed requests, by whose fault it was: the caller's (4xx) or ours (5xx).",
+    "counter",
+    ("fault",),
+)
+VALIDATION_ERRORS = MetricFamily(
+    f"{METRIC_PREFIX}validation_errors_total",
+    "Request validation failures, by the field that failed.",
+    "counter",
+    ("field",),
+)
+AUTHENTICATION_RESULTS = MetricFamily(
+    f"{METRIC_PREFIX}authentication_results_total",
+    "Authentication attempts, by outcome.",
+    "counter",
+    ("result",),
+)
+PROFILE_PARSE_ERRORS = MetricFamily(
+    f"{METRIC_PREFIX}profile_parse_errors_total",
+    "Profile page parse failures, by what could not be parsed.",
+    "counter",
+    ("reason",),
+)
+UPSTREAM_REQUESTS = MetricFamily(
+    f"{METRIC_PREFIX}upstream_requests_total",
+    "Requests made to PESU Academy, by operation and outcome.",
+    "counter",
+    ("operation", "outcome"),
+)
+UPSTREAM_RESPONSES = MetricFamily(
+    f"{METRIC_PREFIX}upstream_responses_total",
+    "Responses from PESU Academy, by operation and status code.",
+    "counter",
+    ("operation", "status"),
+)
+UPSTREAM_LATENCY = MetricFamily(
+    f"{METRIC_PREFIX}upstream_latency_seconds",
+    "Seconds spent waiting on PESU Academy, by operation.",
+    "summary",
+    ("operation",),
+)
+CSRF_CACHE = MetricFamily(
+    f"{METRIC_PREFIX}csrf_cache_total",
+    "Lookups of the cached unauthenticated CSRF client, by whether the cache was warm.",
+    "counter",
+    ("outcome",),
+)
+CSRF_REFRESHES = MetricFamily(
+    f"{METRIC_PREFIX}csrf_refreshes_total",
+    "Periodic background refreshes of the unauthenticated CSRF token, by outcome.",
+    "counter",
+    ("outcome",),
+)
+PREFETCH_TASKS = MetricFamily(
+    f"{METRIC_PREFIX}prefetch_tasks_total",
+    "Background CSRF prefetch tasks, by outcome.",
+    "counter",
+    ("outcome",),
+)
+HTTP_CLIENTS = MetricFamily(
+    f"{METRIC_PREFIX}http_clients_total",
+    "Lifecycle events for upstream HTTP clients. created minus closed is what is still open.",
+    "counter",
+    ("event",),
+)
+LIFESPAN_EVENTS = MetricFamily(
+    f"{METRIC_PREFIX}lifespan_events_total",
+    "Application lifespan events, by kind.",
+    "counter",
+    ("event",),
+)
 
 # Render order, and the single source of HELP and TYPE shared by both views
 FAMILIES: tuple[MetricFamily, ...] = (
@@ -92,8 +169,21 @@ FAMILIES: tuple[MetricFamily, ...] = (
     ROUTE_REQUESTS,
     ERRORS_BY_TYPE,
     AUTHENTICATION_REQUESTS,
+    AUTHENTICATION_RESULTS,
+    PROFILE_PARSE_ERRORS,
+    VALIDATION_ERRORS,
+    FAILURES_BY_FAULT,
     REQUEST_LATENCY,
     ROUTE_LATENCY,
+    UPSTREAM_REQUESTS,
+    UPSTREAM_RESPONSES,
+    UPSTREAM_LATENCY,
+    CSRF_CACHE,
+    CSRF_REFRESHES,
+    PREFETCH_TASKS,
+    HTTP_CLIENTS,
+    LIFESPAN_EVENTS,
+    REQUESTS_IN_FLIGHT,
     PROCESS_START_TIME,
 )
 

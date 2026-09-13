@@ -56,12 +56,32 @@ def test_json_format_shape(client):
         "startTimeSeconds",
         "uptimeSeconds",
         "requests",
+        "requestsInFlight",
         "latency",
         "authentication",
+        "authenticationResults",
         "responsesByStatus",
         "requestsByRoute",
         "errorsByType",
+        "failuresByFault",
+        "validationErrorsByField",
+        "profileParseErrors",
+        "upstream",
+        "csrfCache",
+        "csrfRefreshes",
+        "prefetchTasks",
+        "httpClients",
+        "lifespanEvents",
     }
+
+
+def test_every_metric_family_appears_in_both_views(client):
+    """The two views are built from one snapshot, so neither may quietly omit a family."""
+    from app.metrics.collector import FAMILIES
+
+    prometheus = client.get("/metrics").text
+    for family in FAMILIES:
+        assert f"# TYPE {family.name} " in prometheus, family.name
 
 
 def test_a_request_is_reflected_in_both_views(client):
@@ -165,3 +185,60 @@ def test_latency_is_recorded_for_a_route(client):
     route = client.get("/metrics?fmt=json").json()["requestsByRoute"]["GET /health"]
     assert route["latency"]["count"] == 1
     assert route["latency"]["averageSeconds"] >= 0
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_authentication_outcomes_are_recorded_by_reason(mock_authenticate, client):
+    """errors_total says which class was raised; this says what it meant for the login attempt."""
+    from app.exceptions.authentication import ProfileFetchError
+
+    mock_authenticate.side_effect = AuthenticationError()
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+    mock_authenticate.side_effect = ProfileFetchError()
+    client.post("/authenticate", json={"username": "u", "password": "p", "profile": True})
+    mock_authenticate.side_effect = None
+    mock_authenticate.return_value = {"status": True, "message": "Login successful."}
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+
+    results = client.get("/metrics?fmt=json").json()["authenticationResults"]
+    assert results == {"invalid_credentials": 1, "profile_fetch_error": 1, "success": 1}
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_an_unexpected_error_is_recorded_as_internal(mock_authenticate, client):
+    mock_authenticate.side_effect = RuntimeError("something else entirely")
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+    assert client.get("/metrics?fmt=json").json()["authenticationResults"] == {"internal_error": 1}
+
+
+def test_validation_errors_are_recorded_by_field(client):
+    client.post("/authenticate", json={"password": "p"})
+    client.post("/authenticate", json={"username": "u"})
+    client.get("/metrics?fmt=xml")
+    fields = client.get("/metrics?fmt=json").json()["validationErrorsByField"]
+    assert fields == {"username": 1, "password": 1, "fmt": 1}
+
+
+def test_an_unknown_field_collapses_into_one_bucket(client):
+    """The body is caller-controlled, so the label set must be closed against arbitrary keys."""
+    client.post("/authenticate", json={"username": "u", "password": "p", "surprise": 1})
+    assert client.get("/metrics?fmt=json").json()["validationErrorsByField"] == {"other": 1}
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_failures_are_attributed_to_client_or_server(mock_authenticate, client):
+    mock_authenticate.side_effect = AuthenticationError()
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+    client.get("/raiseUnhandledForMetrics")
+    assert client.get("/metrics?fmt=json").json()["failuresByFault"] == {"client": 1, "server": 1}
+
+
+def test_in_flight_accounts_for_the_gap_in_the_totals(client):
+    """total exceeds success + failed only by what is still being served -- here, this request."""
+    body = client.get("/metrics?fmt=json").json()
+    assert body["requestsInFlight"] == 1
+    assert body["requests"]["total"] == body["requests"]["success"] + body["requests"]["failed"] + 1
+
+
+def test_lifespan_startup_is_recorded(client):
+    assert client.get("/metrics?fmt=json").json()["lifespanEvents"] == {"startup": 1}
