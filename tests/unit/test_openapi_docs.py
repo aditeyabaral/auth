@@ -72,10 +72,9 @@ def test_every_documented_response_has_a_schema(schema):
 def test_json_examples_validate_against_the_model_they_claim(schema):
     """An example its own declared model rejects would mislead every reader.
 
-    Validated as JSON, not as a Python dict, because that is what a client does: the models are
-    strict, and a strict Python-mode validation rejects the ISO *string* these responses actually
-    carry in `timestamp`. In JSON mode -- the mode a caller parsing the body is in -- it parses to
-    a datetime, which is what the schema advertises.
+    Validated **both** ways. JSON mode is what a caller parsing a response body is in; Python mode
+    is what a caller passing a decoded dict is in. A published model that only works in one of them
+    is a trap, so both are asserted rather than picking whichever passes.
     """
     checked = 0
     for path, verb, operation in _operations(schema):
@@ -86,6 +85,7 @@ def test_json_examples_validate_against_the_model_they_claim(schema):
             if model is None or "example" not in content:
                 continue
             model.model_validate_json(json.dumps(content["example"]))
+            model.model_validate(content["example"])
             checked += 1
     assert checked >= 8, f"only {checked} examples were checked; the sweep is not doing its job"
 
@@ -96,6 +96,7 @@ def test_request_examples_validate_against_the_request_model(schema):
     assert len(examples) >= 3
     for name, example in examples.items():
         RequestModel.model_validate_json(json.dumps(example["value"])), name
+        RequestModel.model_validate(example["value"]), name
 
 
 def test_request_examples_cover_the_documented_username_forms(schema):
@@ -191,3 +192,22 @@ def test_the_schema_is_built_once_and_cached():
     second = app.openapi()
     assert first is second
     app.openapi_schema = None
+
+
+def test_a_real_response_can_be_parsed_with_the_published_model(client):
+    """The published schema has to be usable by a client, which is the point of publishing it.
+
+    A real response carries `timestamp` as an ISO string. If the model could only be validated in
+    JSON mode, anyone holding a decoded dict -- which is what every HTTP library hands back -- would
+    be unable to use it.
+    """
+    body = client.get("/health").json()
+    assert ResponseModel.model_validate(body).status is True
+    assert ResponseModel.model_validate_json(json.dumps(body)).status is True
+
+
+def test_the_model_still_rejects_a_wrong_type_elsewhere(client):
+    """Relaxing `timestamp` must not have relaxed the model as a whole."""
+    body = client.get("/health").json()
+    with pytest.raises(Exception, match="status"):
+        ResponseModel.model_validate({**body, "status": "not-a-bool"})
