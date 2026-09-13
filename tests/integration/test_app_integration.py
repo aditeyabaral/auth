@@ -9,7 +9,7 @@ from app.app import app
 unhandled_router = APIRouter()
 
 
-@unhandled_router.get("/raiseUnhandled")
+@unhandled_router.get("/raiseUnhandled", include_in_schema=False)
 async def raise_unhandled():
     raise RuntimeError("Simulated internal server error")
 

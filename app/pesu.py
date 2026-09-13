@@ -1,10 +1,14 @@
 """PESUAcademy class that serves as an interface to the PESU Academy website."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import httpx2
 from selectolax.parser import HTMLParser, Node
@@ -15,6 +19,20 @@ from app.exceptions.authentication import (
     ProfileFetchError,
     ProfileParseError,
 )
+from app.metrics.collector import (
+    CSRF_CACHE,
+    HTTP_CLIENTS,
+    PREFETCH_TASKS,
+    PROFILE_FIELD_FILTERING,
+    PROFILE_PARSE_ERRORS,
+    UPSTREAM_LATENCY,
+    UPSTREAM_REQUESTS,
+    UPSTREAM_RESPONSES,
+    MetricsCollector,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 ProfileField = Literal[
     "name",
@@ -37,7 +55,48 @@ ProfileField = Literal[
 _CLOSE_TASKS: set[asyncio.Task[None]] = set()
 
 
-async def _aclose_client(client: httpx2.AsyncClient) -> None:
+@asynccontextmanager
+async def _upstream_call(metrics: MetricsCollector, operation: str) -> AsyncIterator[list[Any]]:
+    """Time one call to PESU Academy and record its outcome.
+
+    Yields a one-element list: put the response in it and the status code is recorded too. The
+    upstream is the only dependency this service has, so every call through it is timed -- when
+    something is slow or broken, this is what says whether it is us or them.
+
+    Args:
+        metrics (MetricsCollector): The collector to record into.
+        operation (str): The name of the upstream operation, used as a label.
+
+    Yields:
+        list[Any]: A single-element sink for the response object.
+
+    Raises:
+        BaseException: Re-raised unchanged after the failure is recorded.
+    """
+    sink: list[Any] = []
+    started = time.perf_counter()
+    # Pessimistic default, corrected once the body returns. Anything that escapes without setting
+    # it -- a timeout, a connection failure -- is an error, which is the right assumption to fail to.
+    outcome = "error"
+    try:
+        yield sink
+        outcome = "success"
+    except asyncio.CancelledError:
+        # Kept apart from "error": a cancellation means we walked away -- a client disconnected or
+        # the process is shutting down -- not that PESU Academy failed. Counting it as an error
+        # would spike the upstream error rate on every deploy and every abandoned request.
+        outcome = "cancelled"
+        raise
+    finally:
+        # In a finally, so every call is counted and timed exactly once however it ended
+        metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome=outcome)
+        metrics.observe(UPSTREAM_LATENCY, time.perf_counter() - started, operation=operation)
+        # A status exists whenever a response came back, even if something later went wrong with it
+        if sink and (status := getattr(sink[0], "status_code", None)) is not None:
+            metrics.increment(UPSTREAM_RESPONSES, operation=operation, status=str(status))
+
+
+async def _aclose_client(client: httpx2.AsyncClient, metrics: MetricsCollector) -> None:
     """Close an HTTP client, logging rather than raising if the close itself fails.
 
     Cleanup failure must never replace the error that triggered the cleanup: letting `aclose()`
@@ -45,14 +104,20 @@ async def _aclose_client(client: httpx2.AsyncClient) -> None:
 
     Args:
         client (httpx2.AsyncClient): The client to close.
+        metrics (MetricsCollector): The collector to record the outcome into.
     """
     try:
         await client.aclose()
     except Exception:
+        # Counted, not just logged: created minus closed is how many clients are still open, and a
+        # close that fails is exactly the leak this module spent a release learning to avoid.
+        metrics.increment(HTTP_CLIENTS, event="close_failed")
         logging.warning("Failed to close an HTTP client cleanly.", exc_info=True)
+    else:
+        metrics.increment(HTTP_CLIENTS, event="closed")
 
 
-async def _close_client_quietly(client: httpx2.AsyncClient) -> None:
+async def _close_client_quietly(client: httpx2.AsyncClient, metrics: MetricsCollector) -> None:
     """Close an HTTP client, surviving both a failing close and a cancellation mid-close.
 
     Most callers run this from an `except BaseException` handler or a `finally`, which is exactly
@@ -64,8 +129,9 @@ async def _close_client_quietly(client: httpx2.AsyncClient) -> None:
 
     Args:
         client (httpx2.AsyncClient): The client to close.
+        metrics (MetricsCollector): The collector to record the outcome into.
     """
-    task = asyncio.ensure_future(_aclose_client(client))
+    task = asyncio.ensure_future(_aclose_client(client, metrics))
     _CLOSE_TASKS.add(task)
     task.add_done_callback(_CLOSE_TASKS.discard)
     await asyncio.shield(task)
@@ -100,8 +166,14 @@ class PESUAcademy:
         "Section": "section",
     }
 
-    def __init__(self) -> None:
-        """Initialize the PESUAcademy class."""
+    def __init__(self, metrics: MetricsCollector | None = None) -> None:
+        """Initialize the PESUAcademy class.
+
+        Args:
+            metrics (MetricsCollector | None): The collector to record into. Defaults to a private
+                one, so a bare PESUAcademy() still works and simply records where nobody reads.
+        """
+        self._metrics = metrics if metrics is not None else MetricsCollector()
         self._csrf_token: str | None = None
         self._client: httpx2.AsyncClient | None = None
         self._csrf_lock = asyncio.Lock()
@@ -109,16 +181,18 @@ class PESUAcademy:
         # mid-flight. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
         self._prefetch_tasks: set[asyncio.Task[None]] = set()
 
-    @staticmethod
-    async def _fetch_new_client_with_csrf_token() -> tuple[httpx2.AsyncClient, str]:
+    async def _fetch_new_client_with_csrf_token(self) -> tuple[httpx2.AsyncClient, str]:
         """Initialize a fresh client with an unauthenticated CSRF token from PESU Academy."""
         logging.info("Fetching a new client with an unauthenticated CSRF token...")
         # Create a new client
         client = httpx2.AsyncClient(follow_redirects=True, timeout=10.0)
+        self._metrics.increment(HTTP_CLIENTS, event="created")
         # On success the client is handed to the caller, so only close it if we fail to return it
         try:
             # Fetch the CSRF token
-            resp = await client.get("https://www.pesuacademy.com/Academy/")
+            async with _upstream_call(self._metrics, "csrf_fetch") as sink:
+                resp = await client.get("https://www.pesuacademy.com/Academy/")
+                sink.append(resp)
             soup = await asyncio.to_thread(HTMLParser, resp.text)
             if node := soup.css_first("meta[name='csrf-token']"):
                 csrf_token = node.attributes["content"]
@@ -126,7 +200,7 @@ class PESUAcademy:
                 return client, csrf_token
             raise CSRFTokenError("CSRF token not found in the pre-authentication response.")
         except BaseException:
-            await _close_client_quietly(client)
+            await _close_client_quietly(client, self._metrics)
             raise
 
     async def _prefetch_client_with_csrf_token(self) -> None:
@@ -145,12 +219,12 @@ class PESUAcademy:
                 # Close old cached client (if any) to avoid leaks. A failure to close the old
                 # client must not stop the refresh, so it is logged rather than raised.
                 if self._client is not None:
-                    await _close_client_quietly(self._client)
+                    await _close_client_quietly(self._client, self._metrics)
                 # Store the new cached client/token
                 self._client = client
                 self._csrf_token = token
         except BaseException:
-            await _close_client_quietly(client)
+            await _close_client_quietly(client, self._metrics)
             raise
         logging.info("Cache refreshed with new unauthenticated CSRF token.")
 
@@ -169,6 +243,10 @@ class PESUAcademy:
                 client_to_use, token_to_use = self._client, self._csrf_token
                 self._client = None
                 self._csrf_token = None
+
+        # Hit rate is the whole point of the prefetch: a cold cache means the caller waits on an
+        # upstream round trip it was supposed to be spared.
+        self._metrics.increment(CSRF_CACHE, outcome="hit" if cached else "miss")
 
         if not cached:
             # Cold cache: fetch *outside* the lock. Holding it across a fetch would queue every
@@ -195,12 +273,16 @@ class PESUAcademy:
         self._prefetch_tasks.discard(task)
         # exception() raises on a cancelled task, so that has to be checked first
         if task.cancelled():
+            self._metrics.increment(PREFETCH_TASKS, outcome="cancelled")
             return
         if (exception := task.exception()) is not None:
+            self._metrics.increment(PREFETCH_TASKS, outcome="failure")
             logging.error(
                 f"Background CSRF token prefetch failed: {exception!r}",
                 exc_info=exception,
             )
+        else:
+            self._metrics.increment(PREFETCH_TASKS, outcome="success")
 
     def _spawn_prefetch_task(self) -> None:
         """Start a background prefetch of the next client and CSRF token."""
@@ -219,11 +301,13 @@ class PESUAcademy:
         """
         # Use the selector `label.lbl-title-light` to find the key label
         if not (key_node := node.css_first("label.lbl-title-light")) or not (key := key_node.text(strip=True)):
+            self._metrics.increment(PROFILE_PARSE_ERRORS, reason="key_missing")
             raise ProfileParseError(f"Could not parse key for field at index {idx}.")
         # Use the adjacent sibling selector `+` to find value label
         if not (value_node := node.css_first("label.lbl-title-light + label")) or not (
             value := value_node.text(strip=True)
         ):
+            self._metrics.increment(PROFILE_PARSE_ERRORS, reason="value_missing")
             raise ProfileParseError(f"Could not parse value for field at index {idx}.")
         logging.debug(f"Extracted key: '{key}' with value: '{value}' at index {idx}.")
         # If the key is in the map, add it to the profile
@@ -231,6 +315,7 @@ class PESUAcademy:
             logging.debug(f"Adding key: '{mapped_key}', value: '{value}' to profile...")
             profile[mapped_key] = value
         else:
+            self._metrics.increment(PROFILE_PARSE_ERRORS, reason="unknown_field")
             raise ProfileParseError(
                 f"Unknown key: '{key}' in the profile page. The webpage might have changed.",
             )
@@ -260,7 +345,7 @@ class PESUAcademy:
             await asyncio.gather(*tasks, return_exceptions=True)
         async with self._csrf_lock:
             if self._client is not None:
-                await _close_client_quietly(self._client)
+                await _close_client_quietly(self._client, self._metrics)
                 self._client = None
                 self._csrf_token = None
 
@@ -290,7 +375,9 @@ class PESUAcademy:
             "selectedData": "0",
             "_": str(int(datetime.now().timestamp() * 1000)),
         }
-        response = await client.get(profile_url, params=query)
+        async with _upstream_call(self._metrics, "profile_fetch") as sink:
+            response = await client.get(profile_url, params=query)
+            sink.append(response)
         # If the status code is not 200, raise an exception because the profile page is not accessible
         if response.status_code != 200:
             raise ProfileFetchError(
@@ -306,6 +393,7 @@ class PESUAcademy:
             or not (details_nodes := details_container.css("div.form-group"))
             or len(details_nodes) < 7
         ):
+            self._metrics.increment(PROFILE_PARSE_ERRORS, reason="page_structure")
             raise ProfileParseError(
                 f"Failed to parse student profile page from PESU Academy for user={username}."
                 "The webpage might have changed.",
@@ -340,12 +428,16 @@ class PESUAcademy:
             elif campus_code == "2":
                 profile["campus"] = "EC"
             else:
+                # Not fatal -- the profile is returned without a campus name -- but it means the PRN
+                # format has changed, which nothing else would surface.
+                self._metrics.increment(PROFILE_PARSE_ERRORS, reason="unknown_campus_code")
                 logging.warning(
                     f"Unknown campus code: {campus_code} parsed from PRN={profile['prn']} for user={username}",
                 )
 
         # Check if we extracted any profile data
         if not profile:
+            self._metrics.increment(PROFILE_PARSE_ERRORS, reason="no_data")
             raise ProfileParseError(f"No profile data could be extracted for user={username}.")
         logging.info(f"Complete profile information retrieved for user={username}: {profile}.")
 
@@ -396,7 +488,9 @@ class PESUAcademy:
             logging.debug("Attempting to authenticate user...")
             # Make a post request to authenticate the user
             auth_url = "https://www.pesuacademy.com/Academy/j_spring_security_check"
-            response = await client.post(auth_url, data=data)
+            async with _upstream_call(self._metrics, "login") as sink:
+                response = await client.post(auth_url, data=data)
+                sink.append(response)
             soup = await asyncio.to_thread(HTMLParser, response.text)
             logging.debug("Authentication response received.")
 
@@ -425,6 +519,10 @@ class PESUAcademy:
                 logging.info(f"Profile data requested for user={username}. Fetching profile data...")
                 # Fetch the profile information
                 result["profile"] = await self.get_profile_information(client, username)
+                # Recorded at the branch itself rather than from the request body, so it reflects
+                # what actually happened: a caller who passes exactly the default field list has
+                # specified fields but triggers no filtering.
+                self._metrics.increment(PROFILE_FIELD_FILTERING, enabled=str(field_filtering).lower())
                 # Filter the fields if field filtering is enabled
                 if field_filtering:
                     result["profile"] = {key: value for key, value in result["profile"].items() if key in fields}
@@ -435,4 +533,4 @@ class PESUAcademy:
             logging.info(f"Authentication process for user={username} completed successfully.")
             return result
         finally:
-            await _close_client_quietly(client)
+            await _close_client_quietly(client, self._metrics)

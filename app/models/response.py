@@ -29,6 +29,11 @@ class ResponseModel(BaseModel):
 
     timestamp: datetime = Field(
         ...,
+        # Relaxed from the model-wide strict=True for this field alone. The API builds this model
+        # from a datetime but serializes an ISO string onto the wire, so a strict model could not
+        # parse its own responses -- which made the published schema unusable to a client wanting
+        # to validate with it, and forced the documentation tests into JSON mode to compensate.
+        strict=False,
         title="Authentication Timestamp",
         description="Timestamp of the authentication attempt with timezone info.",
         json_schema_extra={"example": "2024-07-28T22:30:10.103368+05:30"},

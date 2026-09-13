@@ -89,11 +89,12 @@ def main() -> int:
         print(
             f"\n❌ The project version must be raised above {base_version}, but this PR leaves it "
             f"at {head_version}.\n\n"
-            "   Every pull request has to bump `version` in pyproject.toml so that what is\n"
-            "   deployed can be identified. Pick the level that matches the change:\n\n"
-            "     major (X.0.0) - a backwards-incompatible API or schema change\n"
-            "     minor (x.Y.0) - new functionality that keeps existing APIs working\n"
-            "     patch (x.y.Z) - a bug fix or an internal change\n\n"
+            "   Every pull request raises `version` in pyproject.toml exactly once, so that what\n"
+            "   is deployed can be identified. One merge to dev is one bump:\n\n"
+            "     minor (x.Y.0) - the default. Raise the minor by one, whatever the change.\n"
+            "     major (X.0.0) - reserved for a backwards-incompatible API or schema change.\n\n"
+            "   Bump once per pull request, not once per feature within it -- a second bump\n"
+            "   skips a version that never reaches dev.\n\n"
             "   Then run `uv lock` so uv.lock records the new version, and commit both files.",
         )
         return 1

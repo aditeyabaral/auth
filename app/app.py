@@ -8,28 +8,44 @@ import datetime
 import logging
 from contextlib import asynccontextmanager
 from importlib.metadata import version
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from fastapi.requests import Request
+    from fastapi.responses import Response
+    from starlette.middleware.base import RequestResponseEndpoint
 
 from pydantic import ValidationError
 
-from app.docs import authenticate_docs, health_docs, readme_docs
+from app.docs import authenticate_docs, health_docs, metrics_docs, readme_docs
 from app.exceptions.base import PESUAcademyError
-from app.models import RequestModel, ResponseModel
+from app.metrics.collector import (
+    AUTHENTICATION_REQUESTS,
+    AUTHENTICATION_RESULTS,
+    CSRF_REFRESHES,
+    ERRORS_BY_TYPE,
+    LIFESPAN_EVENTS,
+    VALIDATION_ERRORS,
+    MetricsCollector,
+)
+from app.metrics.middleware import record_request_metrics
+from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE, MetricsFormat, render_prometheus
+from app.models import MetricsModel, RequestModel, ResponseModel
 from app.pesu import PESUAcademy
 
 IST = ZoneInfo("Asia/Kolkata")
 CSRF_TOKEN_REFRESH_INTERVAL_SECONDS = 45 * 60
+# Validation failures are labelled by field, so the label set has to be closed against a caller who
+# can put anything in the request body
+KNOWN_REQUEST_FIELDS = frozenset({"username", "password", "profile", "fields", "fmt", "body"})
 
 
 async def _refresh_csrf_token() -> None:
@@ -41,18 +57,25 @@ async def _refresh_csrf_token() -> None:
 async def _csrf_token_refresh_loop() -> None:
     """Background task to refresh the CSRF token periodically."""
     while True:
+        # Sleep first. `lifespan` has already primed the cache by the time this task starts, so
+        # refreshing immediately would fetch a second token and throw away the one just prefetched
+        # -- an extra upstream round trip on every single startup.
+        await asyncio.sleep(CSRF_TOKEN_REFRESH_INTERVAL_SECONDS)
         try:
             logging.debug("Refreshing unauthenticated CSRF token...")
             await _refresh_csrf_token()
         except Exception:
+            metrics.increment(CSRF_REFRESHES, outcome="failure")
             logging.exception("Failed to refresh unauthenticated CSRF token in the background.")
-        await asyncio.sleep(CSRF_TOKEN_REFRESH_INTERVAL_SECONDS)
+        else:
+            metrics.increment(CSRF_REFRESHES, outcome="success")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Lifespan event handler for startup and shutdown events."""
     # Startup
+    metrics.increment(LIFESPAN_EVENTS, event="startup")
     logging.info("PESUAuth API startup")
 
     # Prefetch PESUAcademy client for first request
@@ -75,6 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logging.exception("Failed to cancel unauthenticated CSRF token refresh background task.")
 
     await pesu_academy.close_client()
+    metrics.increment(LIFESPAN_EVENTS, event="shutdown")
     logging.info("PESUAuth API shutdown.")
 
 
@@ -99,13 +123,71 @@ app = FastAPI(
         },
     ],
 )
-pesu_academy = PESUAcademy()
+metrics = MetricsCollector()
+pesu_academy = PESUAcademy(metrics)
+
+
+# Captured before the override below, so the schema is still built by FastAPI itself. Calling
+# get_openapi() directly would mean restating the fourteen arguments FastAPI passes it, and
+# silently dropping any that were added later or set on the app afterwards.
+_build_openapi_schema = app.openapi
+
+
+def _openapi_without_phantom_validation_errors() -> dict[str, Any]:
+    """Build the OpenAPI schema without the 422 responses this API can never return.
+
+    FastAPI documents a 422 carrying its own `HTTPValidationError` body on every route whose
+    parameters can fail validation. This API never returns that: `validation_exception_handler`
+    turns every `RequestValidationError` into a **400** with the same
+    `{status, message, timestamp}` body as every other error. Leaving the 422 in Swagger would
+    document a response that cannot occur, in a shape this API never emits.
+
+    Only the auto-generated ones are removed. `/authenticate` genuinely returns a 422 for a profile
+    parse failure and documents it with `ResponseModel`, so it is matched on its schema and kept.
+
+    Returns:
+        dict[str, Any]: The OpenAPI schema, cached on the app after the first call.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = _build_openapi_schema()
+    phantom = "#/components/schemas/HTTPValidationError"
+    for operations in schema.get("paths", {}).values():
+        for operation in operations.values():
+            response = operation.get("responses", {}).get("422", {})
+            content = response.get("content", {}).get("application/json", {})
+            if content.get("schema", {}).get("$ref") == phantom:
+                del operation["responses"]["422"]
+    # Nothing references them once the phantom responses are gone
+    for name in ("HTTPValidationError", "ValidationError"):
+        schema.get("components", {}).get("schemas", {}).pop(name, None)
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _openapi_without_phantom_validation_errors
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    """Record traffic metrics for every request."""
+    # Looks the collector up on the module at call time rather than capturing it, so a test can
+    # swap in a fresh one with monkeypatch.setattr("app.app.metrics", ...).
+    return await record_request_metrics(metrics, request, call_next)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Handler for request validation errors."""
+    metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     errors = exc.errors()
+    # Which field was wrong, not just that something was. The field names are a fixed set, so the
+    # label is bounded; anything unrecognised collapses into one bucket rather than opening the
+    # key space to caller-controlled strings.
+    for error in errors:
+        location = error.get("loc") or ()
+        field = str(location[-1]) if location else "unknown"
+        metrics.increment(VALIDATION_ERRORS, field=field if field in KNOWN_REQUEST_FIELDS else "other")
     # Log only the shape of the failure, never the submitted values. Each entry from `errors()`
     # carries an "input" key which, for a missing required field, is the *entire request body* --
     # so logging it verbatim would write the user's password to the logs in plaintext.
@@ -126,6 +208,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(PESUAcademyError)
 async def pesu_exception_handler(request: Request, exc: PESUAcademyError) -> JSONResponse:
     """Handler for PESUAcademy specific errors."""
+    metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     # Severity follows the status code. A 4xx is an expected outcome -- a wrong password is the
     # API working correctly -- and logging one at ERROR with a traceback both buries real faults
     # and pages whoever alerts on the error rate. Only 5xx gets a stack trace.
@@ -146,6 +229,7 @@ async def pesu_exception_handler(request: Request, exc: PESUAcademyError) -> JSO
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handler for unhandled exceptions."""
+    metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     logging.exception("Unhandled exception occurred.")
     return JSONResponse(
         status_code=500,
@@ -173,6 +257,34 @@ async def health() -> JSONResponse:
             "message": "ok",
             "timestamp": datetime.datetime.now(IST).isoformat(),
         },
+    )
+
+
+@app.get(
+    "/metrics",
+    # The response type depends on ?fmt, so it cannot be declared once. Both shapes are documented
+    # in responses= instead, which is what Swagger renders anyway.
+    response_model=None,
+    responses=metrics_docs.response_examples,
+    tags=["Monitoring"],
+)
+async def metrics_endpoint(fmt: MetricsFormat = MetricsFormat.PROMETHEUS) -> Response:
+    """Expose the collected metrics.
+
+    Query parameters:
+    - fmt (str, optional): `prometheus` for the text exposition format (the default, since that is
+      what a scraper expects from this path), or `json` for the same counters as JSON.
+    """
+    snapshot = metrics.snapshot()
+    if fmt is MetricsFormat.JSON:
+        # by_alias so the keys are camelCase like every other response this API returns
+        return JSONResponse(
+            status_code=200,
+            content=MetricsModel.from_snapshot(snapshot).model_dump(by_alias=True),
+        )
+    return PlainTextResponse(
+        content=render_prometheus(snapshot),
+        media_type=PROMETHEUS_CONTENT_TYPE,
     )
 
 
@@ -214,15 +326,32 @@ async def authenticate(payload: RequestModel) -> JSONResponse:
 
     # Authenticate the user
     authentication_result = {"timestamp": current_time}
+    # Recorded here rather than in the middleware: the profile flag lives in the request body, and
+    # reading the body in middleware would consume the downstream receive channel and pull a
+    # payload containing a plaintext password into another layer. How many auth requests arrive is
+    # already answered by route_requests_total; only the split needs the body.
+    metrics.increment(AUTHENTICATION_REQUESTS, profile=str(profile).lower())
     logging.info(f"Authenticating user={username} with PESU Academy...")
-    authentication_result.update(
-        await pesu_academy.authenticate(
-            username=username,
-            password=password,
-            profile=profile,
-            fields=fields,
-        ),
-    )
+    try:
+        authentication_result.update(
+            await pesu_academy.authenticate(
+                username=username,
+                password=password,
+                profile=profile,
+                fields=fields,
+            ),
+        )
+    except Exception:
+        # The outcome only, never the reason. errors_total{type} already names the exception class,
+        # and recording it a second time here meant two counters describing one event that had to
+        # be kept in step by a hand-written mapping -- which would have drifted the first time
+        # someone added an exception class and forgot the entry.
+        #
+        # This family exists for the one thing nothing else can answer: the login success rate,
+        # with success and failure in one family sharing a denominator.
+        metrics.increment(AUTHENTICATION_RESULTS, result="failure")
+        raise
+    metrics.increment(AUTHENTICATION_RESULTS, result="success")
 
     # Validate the response
     try:
