@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 
 if TYPE_CHECKING:
@@ -128,6 +127,12 @@ metrics = MetricsCollector()
 pesu_academy = PESUAcademy(metrics)
 
 
+# Captured before the override below, so the schema is still built by FastAPI itself. Calling
+# get_openapi() directly would mean restating the fourteen arguments FastAPI passes it, and
+# silently dropping any that were added later or set on the app afterwards.
+_build_openapi_schema = app.openapi
+
+
 def _openapi_without_phantom_validation_errors() -> dict[str, Any]:
     """Build the OpenAPI schema without the 422 responses this API can never return.
 
@@ -145,13 +150,7 @@ def _openapi_without_phantom_validation_errors() -> dict[str, Any]:
     """
     if app.openapi_schema:
         return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-        tags=app.openapi_tags,
-    )
+    schema = _build_openapi_schema()
     phantom = "#/components/schemas/HTTPValidationError"
     for operations in schema.get("paths", {}).values():
         for operation in operations.values():

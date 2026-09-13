@@ -163,3 +163,51 @@ def test_a_label_cannot_shadow_the_observation(collector):
     family = MetricFamily("pesu_auth_odd_seconds", "doc", "summary", ("seconds",))
     collector.observe(family, 1.5, seconds="x")
     assert collector.snapshot().value(f"{family.name}_sum", seconds="x") == 1.5
+
+
+def test_every_defined_family_is_registered():
+    """`FAMILIES` drives both seeding and rendering.
+
+    A family defined but left out of it would be collected into and then never exposed -- silently,
+    since nothing else would notice. This keeps the list from drifting from the module.
+    """
+    from app.metrics import collector as module
+
+    defined = {
+        value.name
+        for name, value in vars(module).items()
+        if isinstance(value, MetricFamily) and not name.startswith("_")
+    }
+    assert defined == {family.name for family in FAMILIES}
+
+
+def test_family_names_are_unique():
+    names = [family.name for family in FAMILIES]
+    assert len(names) == len(set(names))
+
+
+def test_no_family_name_collides_with_a_summary_series():
+    """A counter named `x_sum` would be indistinguishable from the sum series of a summary `x`."""
+    summary_series = {
+        f"{family.name}_{suffix}"
+        for family in FAMILIES
+        if family.metric_type == "summary"
+        for suffix in ("sum", "count")
+    }
+    assert summary_series.isdisjoint({family.name for family in FAMILIES})
+
+
+def test_every_family_name_is_a_valid_prometheus_identifier():
+    import re
+
+    for family in FAMILIES:
+        assert re.fullmatch(r"[a-zA-Z_:][a-zA-Z0-9_:]*", family.name), family.name
+        for label in family.labels:
+            assert re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", label), (family.name, label)
+
+
+def test_every_family_documents_itself_within_one_exposition_line():
+    """HELP text is rendered into the docs example, which is linted at 120 characters."""
+    for family in FAMILIES:
+        assert len(f"# HELP {family.name} {family.documentation}") <= 118, family.name
+        assert family.documentation.endswith("."), family.name

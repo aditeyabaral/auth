@@ -75,23 +75,25 @@ async def _upstream_call(metrics: MetricsCollector, operation: str) -> AsyncIter
     """
     sink: list[Any] = []
     started = time.perf_counter()
+    # Pessimistic default, corrected once the body returns. Anything that escapes without setting
+    # it -- a timeout, a connection failure -- is an error, which is the right assumption to fail to.
+    outcome = "error"
     try:
         yield sink
+        outcome = "success"
     except asyncio.CancelledError:
         # Kept apart from "error": a cancellation means we walked away -- a client disconnected or
         # the process is shutting down -- not that PESU Academy failed. Counting it as an error
         # would spike the upstream error rate on every deploy and every abandoned request.
-        metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome="cancelled")
-        metrics.observe(UPSTREAM_LATENCY, time.perf_counter() - started, operation=operation)
+        outcome = "cancelled"
         raise
-    except BaseException:
-        metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome="error")
+    finally:
+        # In a finally, so every call is counted and timed exactly once however it ended
+        metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome=outcome)
         metrics.observe(UPSTREAM_LATENCY, time.perf_counter() - started, operation=operation)
-        raise
-    metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome="success")
-    metrics.observe(UPSTREAM_LATENCY, time.perf_counter() - started, operation=operation)
-    if sink and (status := getattr(sink[0], "status_code", None)) is not None:
-        metrics.increment(UPSTREAM_RESPONSES, operation=operation, status=str(status))
+        # A status exists whenever a response came back, even if something later went wrong with it
+        if sink and (status := getattr(sink[0], "status_code", None)) is not None:
+            metrics.increment(UPSTREAM_RESPONSES, operation=operation, status=str(status))
 
 
 async def _aclose_client(client: httpx2.AsyncClient, metrics: MetricsCollector) -> None:
