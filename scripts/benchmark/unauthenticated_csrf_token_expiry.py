@@ -5,7 +5,7 @@ import os
 import time
 
 from tqdm.auto import tqdm
-from util import make_request
+from util import make_request, resolve_output_path
 
 
 def test_response(response: dict, no_profile: bool) -> bool:
@@ -26,11 +26,6 @@ def test_response(response: dict, no_profile: bool) -> bool:
 
 
 if __name__ == "__main__":
-    """Main function to test the unauthenticated CSRF token expiry.
-
-    This script tests the unauthenticated CSRF token expiry by making requests to the authenticate endpoint.
-    It can be run in parallel using threads or sequentially.
-    """
     parser = argparse.ArgumentParser(description="Test unauthenticated CSRF token expiry.")
     parser.add_argument(
         "--host",
@@ -65,8 +60,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         type=str,
-        default="unauthenticated_csrf_token_expiry.csv",
-        help="The output file name (default: unauthenticated_csrf_token_expiry.csv)",
+        help="The output file to save the results to (default: an auto-named CSV)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="The directory to write results into (default: benchmark/results at the repository root)",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        help="An identifier appended to the generated filename, for telling runs apart",
     )
     parser.add_argument(
         "--verbose",
@@ -90,32 +94,45 @@ if __name__ == "__main__":
     ):
         time.sleep(1)
 
-    while True:
-        request_count += 1
-        response, elapsed = make_request(
-            host=args.host,
-            timeout=args.timeout,
-            profile=not args.no_profile,
-            route="authenticate",
-        )
-        success.append(int(test_response(response, args.no_profile)))
-        times.append(elapsed)
-        if args.verbose:
-            print(f"Response: {response}")
+    outfile = resolve_output_path(
+        script_name="unauthenticated_csrf_token_expiry",
+        extension="csv",
+        output=args.output,
+        output_dir=args.output_dir,
+        tag=args.tag,
+    )
 
-        if success[-1] == 0:
-            break
-
-        next_interval = args.interval * request_count * 60
-        for _ in tqdm(
-            range(next_interval),
-            desc=f"Waiting {next_interval / 60} minutes before next request",
-            leave=False,
-            unit="s",
-        ):
-            time.sleep(1)
-        waiting_times.append(next_interval)
-
-    with open(args.output, "w") as f:
+    # Each row is written as it is measured rather than after the loop ends. This script sleeps for
+    # hours between requests, so buffering everything until the end means a Ctrl-C -- or anything
+    # else that interrupts a long run -- throws away every measurement taken so far.
+    with open(outfile, "w", buffering=1) as f:
         f.write("status,time,waiting_time\n")
-        f.writelines(f"{s},{t},{w}\n" for s, t, w in zip(success, times, waiting_times, strict=False))
+        while True:
+            request_count += 1
+            response, elapsed = make_request(
+                host=args.host,
+                timeout=args.timeout,
+                profile=not args.no_profile,
+                route="authenticate",
+            )
+            status = int(test_response(response, args.no_profile))
+            success.append(status)
+            times.append(elapsed)
+            f.write(f"{status},{elapsed},{waiting_times[-1]}\n")
+            if args.verbose:
+                print(f"Response: {response}")
+
+            if status == 0:
+                break
+
+            next_interval = args.interval * request_count * 60
+            for _ in tqdm(
+                range(next_interval),
+                desc=f"Waiting {next_interval / 60} minutes before next request",
+                leave=False,
+                unit="s",
+            ):
+                time.sleep(1)
+            waiting_times.append(next_interval)
+
+    print(f"Results saved to: {outfile}")

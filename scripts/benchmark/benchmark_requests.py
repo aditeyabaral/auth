@@ -4,14 +4,9 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tqdm.auto import tqdm
-from util import make_request
+from util import make_request, resolve_output_path
 
 if __name__ == "__main__":
-    """Main function to benchmark the PESUAuth API.
-
-    This script benchmarks the PESUAuth API by making requests to the specified endpoint.
-    It can be run in parallel using threads or sequentially.
-    """
     parser = argparse.ArgumentParser(description="Benchmark PESUAuth API.")
     parser.add_argument(
         "--max-workers",
@@ -45,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--route",
         type=str,
-        choices=["authenticate", "health", "readme"],
+        choices=["authenticate", "health", "readme", "metrics", "metrics.json"],
         default="authenticate",
         help="The route to make the request to (default: authenticate)",
     )
@@ -63,7 +58,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         type=str,
-        help="The output file to save the benchmark results to",
+        help="The output file to save the benchmark results to (default: an auto-named CSV)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="The directory to write results into (default: benchmark/results at the repository root)",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        help="An identifier appended to the generated filename, for telling runs apart",
     )
     args = parser.parse_args()
 
@@ -123,22 +128,19 @@ if __name__ == "__main__":
             else:
                 success.append(0)
 
-    outfile = (
-        output
-        if output
-        else (
-            f"benchmark_[num_requests={num_requests}]_[max_workers={max_workers}]_"
-            f"[parallel={parallel}]_[route={route}]_[timeout={timeout}].csv"
-        )
+    outfile = resolve_output_path(
+        script_name="benchmark_requests",
+        extension="csv",
+        output=output,
+        output_dir=args.output_dir,
+        tag=args.tag,
     )
 
-    with open(
-        outfile,
-        "w",
-    ) as f:
+    with open(outfile, "w") as f:
         f.write("status,time\n")
         f.writelines(f"{s},{t}\n" for s, t in zip(success, times, strict=False))
 
+    print(f"Results saved to: {outfile}")
     print(f"Benchmark completed. Successful requests: {sum(success)} out of {len(success)}")
     print(f"Average time per request: {sum(times) / len(times):.2f} seconds")
     print(f"Total time taken: {sum(times):.2f} seconds")

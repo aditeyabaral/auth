@@ -1,12 +1,19 @@
 """Script to analyze benchmark CSV output."""
 
+from __future__ import annotations
+
 import argparse
 import statistics
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from util import resolve_output_path
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def analyze_benchmark(df: pd.DataFrame) -> None:
@@ -47,12 +54,13 @@ def analyze_benchmark(df: pd.DataFrame) -> None:
     print(f"📊 99th percentile time : {p99:.3f} sec")
 
 
-def plot_distribution(dfs: list[pd.DataFrame], files: list[str]) -> None:
+def plot_distribution(dfs: list[pd.DataFrame], files: list[str], outfile: Path) -> None:
     """Plot the distribution of response times for each benchmark on the same plot.
 
     Args:
         dfs (list[pd.DataFrame]): The benchmark DataFrames.
         files (list[str]): The file names.
+        outfile (Path): The path to write the plot to.
 
     Returns:
         None
@@ -75,16 +83,18 @@ def plot_distribution(dfs: list[pd.DataFrame], files: list[str]) -> None:
     plt.ylabel("Density")
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.tight_layout()
-    plt.savefig("distribution.png", dpi=300)
+    plt.savefig(outfile, dpi=300)
+    print(f"Results saved to: {outfile}")
     plt.close()
 
 
-def plot_response_time_over_requests(dfs: list[pd.DataFrame], files: list[str]) -> None:
+def plot_response_time_over_requests(dfs: list[pd.DataFrame], files: list[str], outfile: Path) -> None:
     """Plot the response time over requests for each benchmark on the same plot.
 
     Args:
         dfs (list[pd.DataFrame]): The benchmark DataFrames.
         files (list[str]): The file names.
+        outfile (Path): The path to write the plot to.
 
     Returns:
         None
@@ -99,13 +109,25 @@ def plot_response_time_over_requests(dfs: list[pd.DataFrame], files: list[str]) 
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.legend()
     plt.tight_layout()
-    plt.savefig("timeline.png", dpi=300)
+    plt.savefig(outfile, dpi=300)
+    print(f"Results saved to: {outfile}")
     plt.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze benchmark CSV output.")
-    parser.add_argument("--files", "-f", help="Path to the benchmark CSV files", nargs="+")
+    # Required: without it args.files is None and the read below fails with a bare TypeError
+    parser.add_argument("--files", "-f", help="Path to the benchmark CSV files", nargs="+", required=True)
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="The directory to write plots into (default: benchmark/results at the repository root)",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        help="An identifier appended to the generated filenames, for telling runs apart",
+    )
     args = parser.parse_args()
 
     dfs = [pd.read_csv(file) for file in args.files]
@@ -114,5 +136,17 @@ if __name__ == "__main__":
         analyze_benchmark(df)
         print("-" * 40)
 
-    plot_distribution(dfs, args.files)
-    plot_response_time_over_requests(dfs, args.files)
+    for plot, stem in (
+        (plot_distribution, "distribution"),
+        (plot_response_time_over_requests, "timeline"),
+    ):
+        plot(
+            dfs,
+            args.files,
+            resolve_output_path(
+                script_name=stem,
+                extension="png",
+                output_dir=args.output_dir,
+                tag=args.tag,
+            ),
+        )
