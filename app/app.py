@@ -27,12 +27,6 @@ if TYPE_CHECKING:
 from pydantic import ValidationError
 
 from app.docs import authenticate_docs, health_docs, metrics_docs, readme_docs
-from app.exceptions.authentication import (
-    AuthenticationError,
-    CSRFTokenError,
-    ProfileFetchError,
-    ProfileParseError,
-)
 from app.exceptions.base import PESUAcademyError
 from app.metrics.collector import (
     AUTHENTICATION_REQUESTS,
@@ -53,14 +47,6 @@ CSRF_TOKEN_REFRESH_INTERVAL_SECONDS = 45 * 60
 # Validation failures are labelled by field, so the label set has to be closed against a caller who
 # can put anything in the request body
 KNOWN_REQUEST_FIELDS = frozenset({"username", "password", "profile", "fields", "fmt", "body"})
-# Failure vocabulary for authentication attempts. Keyed on the exception class rather than the
-# status code, because CSRFTokenError and ProfileFetchError are both 502 and mean different things.
-AUTHENTICATION_FAILURE_RESULTS = {
-    AuthenticationError: "invalid_credentials",
-    CSRFTokenError: "csrf_token_error",
-    ProfileFetchError: "profile_fetch_error",
-    ProfileParseError: "profile_parse_error",
-}
 
 
 async def _refresh_csrf_token() -> None:
@@ -356,15 +342,15 @@ async def authenticate(payload: RequestModel) -> JSONResponse:
                 fields=fields,
             ),
         )
-    except PESUAcademyError as exc:
-        # Why the attempt failed, not just that it did. errors_total already counts the exception
-        # class; this records the same event in the vocabulary someone actually asks questions in --
-        # "how many logins failed because the password was wrong" versus "because PESU was broken".
-        result = AUTHENTICATION_FAILURE_RESULTS.get(type(exc), "other")
-        metrics.increment(AUTHENTICATION_RESULTS, result=result)
-        raise
     except Exception:
-        metrics.increment(AUTHENTICATION_RESULTS, result="internal_error")
+        # The outcome only, never the reason. errors_total{type} already names the exception class,
+        # and recording it a second time here meant two counters describing one event that had to
+        # be kept in step by a hand-written mapping -- which would have drifted the first time
+        # someone added an exception class and forgot the entry.
+        #
+        # This family exists for the one thing nothing else can answer: the login success rate,
+        # with success and failure in one family sharing a denominator.
+        metrics.increment(AUTHENTICATION_RESULTS, result="failure")
         raise
     metrics.increment(AUTHENTICATION_RESULTS, result="success")
 

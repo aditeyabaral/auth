@@ -322,8 +322,11 @@ class MetricsModel(BaseModel):
     authentication_results: dict[str, int] = Field(
         ...,
         title="Authentication Results",
-        description="Authentication attempts keyed by outcome, so failures can be told apart by cause.",
-        json_schema_extra={"example": {"success": 612, "invalid_credentials": 160, "profile_fetch_error": 2}},
+        description=(
+            'Authentication attempts keyed by outcome: "success" or "failure". Why a failure '
+            "happened is in errorsByType, which names the exception class."
+        ),
+        json_schema_extra={"example": {"success": 612, "failure": 162}},
     )
 
     profile_field_filtering: dict[str, int] = Field(

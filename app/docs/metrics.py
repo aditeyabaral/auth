@@ -40,9 +40,9 @@ pesu_auth_errors_total{type="AuthenticationError"} 160
 # HELP pesu_auth_authentication_requests_total Authentication requests, by whether profile data was requested.
 # TYPE pesu_auth_authentication_requests_total counter
 pesu_auth_authentication_requests_total{profile="false"} 640
-# HELP pesu_auth_authentication_results_total Authentication attempts, by outcome.
+# HELP pesu_auth_authentication_results_total Authentication attempts, by outcome. errors_total says why one failed.
 # TYPE pesu_auth_authentication_results_total counter
-pesu_auth_authentication_results_total{result="invalid_credentials"} 160
+pesu_auth_authentication_results_total{result="failure"} 162
 # HELP pesu_auth_profile_field_filtering_total Profile fetches, by whether the caller narrowed the fields returned.
 # TYPE pesu_auth_profile_field_filtering_total counter
 pesu_auth_profile_field_filtering_total{enabled="false"} 94
@@ -113,11 +113,11 @@ _JSON_EXAMPLE = {
             "latency": {"sumSeconds": 741.2118, "count": 774, "averageSeconds": 0.957637984496124},
         },
     },
-    "errorsByType": {"AuthenticationError": 160, "RequestValidationError": 12},
+    "errorsByType": {"AuthenticationError": 160, "ProfileFetchError": 2, "RequestValidationError": 12},
     "requestsInFlight": 1,
     "failuresByFault": {"client": 172, "server": 10},
     "validationErrorsByField": {"password": 4, "username": 8},
-    "authenticationResults": {"invalid_credentials": 160, "profile_fetch_error": 2, "success": 612},
+    "authenticationResults": {"failure": 162, "success": 612},
     "profileFieldFiltering": {"false": 94, "true": 40},
     "profileParseErrors": {"unknown_field": 3},
     "upstream": {

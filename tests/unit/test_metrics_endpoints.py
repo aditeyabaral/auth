@@ -189,27 +189,53 @@ def test_latency_is_recorded_for_a_route(client):
 
 
 @patch("app.app.pesu_academy.authenticate")
-def test_authentication_outcomes_are_recorded_by_reason(mock_authenticate, client):
-    """errors_total says which class was raised; this says what it meant for the login attempt."""
+def test_authentication_outcomes_are_success_or_failure(mock_authenticate, client):
+    """Outcome only. Every kind of failure lands in one bucket, whatever raised it."""
     from app.exceptions.authentication import ProfileFetchError
 
     mock_authenticate.side_effect = AuthenticationError()
     client.post("/authenticate", json={"username": "u", "password": "p"})
     mock_authenticate.side_effect = ProfileFetchError()
     client.post("/authenticate", json={"username": "u", "password": "p", "profile": True})
+    mock_authenticate.side_effect = RuntimeError("something else entirely")
+    client.post("/authenticate", json={"username": "u", "password": "p"})
     mock_authenticate.side_effect = None
     mock_authenticate.return_value = {"status": True, "message": "Login successful."}
     client.post("/authenticate", json={"username": "u", "password": "p"})
 
     results = client.get("/metrics?fmt=json").json()["authenticationResults"]
-    assert results == {"invalid_credentials": 1, "profile_fetch_error": 1, "success": 1}
+    assert results == {"success": 1, "failure": 3}
 
 
 @patch("app.app.pesu_academy.authenticate")
-def test_an_unexpected_error_is_recorded_as_internal(mock_authenticate, client):
-    mock_authenticate.side_effect = RuntimeError("something else entirely")
+def test_the_reason_for_a_failure_is_still_recoverable(mock_authenticate, client):
+    """Why a login failed lives in exactly one place now, named by exception class."""
+    from app.exceptions.authentication import ProfileFetchError
+
+    mock_authenticate.side_effect = AuthenticationError()
     client.post("/authenticate", json={"username": "u", "password": "p"})
-    assert client.get("/metrics?fmt=json").json()["authenticationResults"] == {"internal_error": 1}
+    mock_authenticate.side_effect = ProfileFetchError()
+    client.post("/authenticate", json={"username": "u", "password": "p", "profile": True})
+
+    body = client.get("/metrics?fmt=json").json()
+    assert body["errorsByType"] == {"AuthenticationError": 1, "ProfileFetchError": 1}
+    assert body["authenticationResults"]["failure"] == 2
+
+
+@patch("app.app.pesu_academy.authenticate")
+def test_the_success_rate_has_a_matching_denominator(mock_authenticate, client):
+    """The reason this family survives: success and failure share one denominator.
+
+    Computing the same figure from errorsByType would mean subtracting several error classes from
+    a different family, which is exactly the fragile cross-family arithmetic this avoids.
+    """
+    mock_authenticate.return_value = {"status": True, "message": "Login successful."}
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+    mock_authenticate.side_effect = AuthenticationError()
+    client.post("/authenticate", json={"username": "u", "password": "p"})
+
+    body = client.get("/metrics?fmt=json").json()
+    assert sum(body["authenticationResults"].values()) == body["authentication"]["total"]
 
 
 def test_validation_errors_are_recorded_by_field(client):

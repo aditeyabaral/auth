@@ -107,7 +107,7 @@ PROFILE_FIELD_FILTERING = MetricFamily(
 )
 AUTHENTICATION_RESULTS = MetricFamily(
     f"{METRIC_PREFIX}authentication_results_total",
-    "Authentication attempts, by outcome.",
+    "Authentication attempts, by outcome. errors_total says why one failed.",
     "counter",
     ("result",),
 )

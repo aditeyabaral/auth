@@ -208,6 +208,10 @@ requests.success + requests.failed + requestsInFlight  ==  requests.total
 sum(responsesByStatus)                                 ==  requests.success + requests.failed
 ```
 
+A login failure's *reason* comes from `errorsByType`, which names the exception class.
+`authenticationResults` carries only the outcome, so the reason is recorded in exactly one place, and
+`sum(authenticationResults) == authentication.total` modulo attempts still in flight.
+
 `sum(errorsByType)` is normally **less** than `requests.failed`: a `404` or `405` is produced by the router, so no
 exception handler of ours runs for it.
 
@@ -248,12 +252,12 @@ A few definitions that are easy to assume wrongly:
 
 **Authentication**
 
-| Metric                                   | Meaning                                                                                                                                                                                         |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authentication_requests_total{profile}` | Authentication requests, split by whether profile data was asked for                                                                                                                            |
-| `authentication_results_total{result}`   | Attempts by outcome: `success`, `invalid_credentials`, `csrf_token_error`, `profile_fetch_error`, `profile_parse_error`, `internal_error`. This is the one to read for "why are logins failing" |
-| `profile_field_filtering_total{enabled}` | Profile fetches, split by whether the caller narrowed the returned fields. Recorded where the branch is taken, so a caller passing exactly the default list counts as `false`                   |
-| `profile_parse_errors_total{reason}`     | Parse failures by what broke: `key_missing`, `value_missing`, `unknown_field`, `page_structure`, `no_data`, `unknown_campus_code`. These mean PESU Academy's page changed                       |
+| Metric                                   | Meaning                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authentication_requests_total{profile}` | Authentication requests, split by whether profile data was asked for                                                                                                                                                                                                                              |
+| `authentication_results_total{result}`   | Attempts by outcome: `success` or `failure`. Deliberately only those two — `errors_total` already names the exception class, and recording the reason here too would put one fact in two places. This family exists for the login **success rate**, where success and failure share a denominator |
+| `profile_field_filtering_total{enabled}` | Profile fetches, split by whether the caller narrowed the returned fields. Recorded where the branch is taken, so a caller passing exactly the default list counts as `false`                                                                                                                     |
+| `profile_parse_errors_total{reason}`     | Parse failures by what broke: `key_missing`, `value_missing`, `unknown_field`, `page_structure`, `no_data`, `unknown_campus_code`. These mean PESU Academy's page changed                                                                                                                         |
 
 **Upstream (PESU Academy)**
 
@@ -312,15 +316,15 @@ pesu_auth_route_requests_total{method="POST",route="/authenticate"} 774
 # HELP pesu_auth_errors_total Errors rendered by an exception handler, by exception class.
 # TYPE pesu_auth_errors_total counter
 pesu_auth_errors_total{type="AuthenticationError"} 160
+pesu_auth_errors_total{type="ProfileFetchError"} 2
 pesu_auth_errors_total{type="RequestValidationError"} 12
 # HELP pesu_auth_authentication_requests_total Authentication requests, by whether profile data was requested.
 # TYPE pesu_auth_authentication_requests_total counter
 pesu_auth_authentication_requests_total{profile="false"} 640
 pesu_auth_authentication_requests_total{profile="true"} 134
-# HELP pesu_auth_authentication_results_total Authentication attempts, by outcome.
+# HELP pesu_auth_authentication_results_total Authentication attempts, by outcome. errors_total says why one failed.
 # TYPE pesu_auth_authentication_results_total counter
-pesu_auth_authentication_results_total{result="invalid_credentials"} 160
-pesu_auth_authentication_results_total{result="profile_fetch_error"} 2
+pesu_auth_authentication_results_total{result="failure"} 162
 pesu_auth_authentication_results_total{result="success"} 612
 # HELP pesu_auth_profile_field_filtering_total Profile fetches, by whether the caller narrowed the fields returned.
 # TYPE pesu_auth_profile_field_filtering_total counter
@@ -454,6 +458,7 @@ which is `null` rather than absent when nothing has been recorded yet, so the sh
   },
   "errorsByType": {
     "AuthenticationError": 160,
+    "ProfileFetchError": 2,
     "RequestValidationError": 12
   },
   "requestsInFlight": 1,
@@ -466,8 +471,7 @@ which is `null` rather than absent when nothing has been recorded yet, so the sh
     "username": 8
   },
   "authenticationResults": {
-    "invalid_credentials": 160,
-    "profile_fetch_error": 2,
+    "failure": 162,
     "success": 612
   },
   "profileFieldFiltering": {
