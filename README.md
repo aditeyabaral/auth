@@ -177,10 +177,28 @@ pesu_auth_responses_total{status="200"} 1094
 pesu_auth_responses_total{status="401"} 160
 ```
 
+#### What is measured
+
+| Area            | Metrics                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Traffic         | requests received, succeeded, failed, in flight; responses by status; requests and latency per route                                                                                               |
+| Fault           | failures split into `client` (4xx) and `server` (5xx), so an alert can fire on only our own faults                                                                                                 |
+| Errors          | errors by exception class, and validation failures by the field that failed                                                                                                                        |
+| Authentication  | requests split by whether profile data was asked for, and results by outcome: `success`, `invalid_credentials`, `csrf_token_error`, `profile_fetch_error`, `profile_parse_error`, `internal_error` |
+| Profile parsing | failures by what could not be parsed: `key_missing`, `value_missing`, `unknown_field`, `page_structure`, `no_data`, `unknown_campus_code`                                                          |
+| Upstream        | every call to PESU Academy — `csrf_fetch`, `login`, `profile_fetch` — with count, outcome, latency and the upstream status code                                                                    |
+| Internals       | CSRF cache hit/miss, background refresh outcomes, prefetch task outcomes, HTTP client lifecycle, lifespan events                                                                                   |
+
+`upstream` is the one to look at first when the API is slow: it is the only dependency this service has, and its
+latency is measured separately from the API's own, so a slow request can be attributed to PESU Academy rather than
+guessed at. `httpClients` is the leak indicator — `created` minus `closed` is how many are still open, which should be
+one (the prefetched client) at rest.
+
 The counters live in memory and **reset when the process restarts**, which is why
 `pesu_auth_process_start_time_seconds` is exposed: without it a dashboard cannot tell a restart from a drop in traffic.
 Status codes and exception classes are recorded separately, so errors that share a status code — `CSRFTokenError` and
-`ProfileFetchError` are both `502` — stay distinguishable.
+`ProfileFetchError` are both `502` — stay distinguishable, and `authenticationResults` records the same failures in the
+vocabulary you would ask questions in.
 
 Requests to `/metrics` are themselves counted. Excluding them would mean the endpoint reported a request total that did
 not match the sum of its own response counts.

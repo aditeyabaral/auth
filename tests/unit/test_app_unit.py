@@ -81,6 +81,23 @@ async def test_csrf_token_refresh_loop_waits_before_its_first_refresh(mock_refre
     mock_refresh.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@patch("asyncio.sleep", new_callable=AsyncMock)
+@patch("app.app._refresh_csrf_token")
+async def test_csrf_token_refresh_loop_records_a_successful_refresh(mock_refresh, mock_sleep, monkeypatch):
+    from app.metrics import CSRF_REFRESHES, MetricsCollector
+
+    collector = MetricsCollector()
+    monkeypatch.setattr("app.app.metrics", collector)
+    mock_sleep.side_effect = [None, asyncio.CancelledError]
+
+    with pytest.raises(asyncio.CancelledError):
+        await _csrf_token_refresh_loop()
+
+    mock_refresh.assert_awaited_once()
+    assert collector.snapshot().value(CSRF_REFRESHES.name, outcome="success") == 1.0
+
+
 def test_lifespan_logs_a_refresh_task_that_refuses_to_cancel(caplog):
     """A background task that fails its own cancellation is reported, not swallowed at shutdown."""
 
