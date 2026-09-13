@@ -8,12 +8,13 @@ import datetime
 import logging
 from contextlib import asynccontextmanager
 from importlib.metadata import version
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ from app.exceptions.authentication import (
     ProfileParseError,
 )
 from app.exceptions.base import PESUAcademyError
-from app.metrics import (
+from app.metrics.collector import (
     AUTHENTICATION_REQUESTS,
     AUTHENTICATION_RESULTS,
     CSRF_REFRESHES,
@@ -139,6 +140,47 @@ app = FastAPI(
 )
 metrics = MetricsCollector()
 pesu_academy = PESUAcademy(metrics)
+
+
+def _openapi_without_phantom_validation_errors() -> dict[str, Any]:
+    """Build the OpenAPI schema without the 422 responses this API can never return.
+
+    FastAPI documents a 422 carrying its own `HTTPValidationError` body on every route whose
+    parameters can fail validation. This API never returns that: `validation_exception_handler`
+    turns every `RequestValidationError` into a **400** with the same
+    `{status, message, timestamp}` body as every other error. Leaving the 422 in Swagger would
+    document a response that cannot occur, in a shape this API never emits.
+
+    Only the auto-generated ones are removed. `/authenticate` genuinely returns a 422 for a profile
+    parse failure and documents it with `ResponseModel`, so it is matched on its schema and kept.
+
+    Returns:
+        dict[str, Any]: The OpenAPI schema, cached on the app after the first call.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+    phantom = "#/components/schemas/HTTPValidationError"
+    for operations in schema.get("paths", {}).values():
+        for operation in operations.values():
+            response = operation.get("responses", {}).get("422", {})
+            content = response.get("content", {}).get("application/json", {})
+            if content.get("schema", {}).get("$ref") == phantom:
+                del operation["responses"]["422"]
+    # Nothing references them once the phantom responses are gone
+    for name in ("HTTPValidationError", "ValidationError"):
+        schema.get("components", {}).get("schemas", {}).pop(name, None)
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _openapi_without_phantom_validation_errors
 
 
 @app.middleware("http")

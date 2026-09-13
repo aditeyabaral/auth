@@ -146,3 +146,20 @@ def test_metric_family_is_immutable():
     family = MetricFamily("x", "y", "counter")
     with pytest.raises(AttributeError):
         family.name = "z"
+
+
+def test_a_label_cannot_shadow_the_amount(collector):
+    """`value` is positional-only, so a family may declare a label of that name safely."""
+    from app.metrics.collector import MetricFamily
+
+    family = MetricFamily("pesu_auth_odd_total", "doc", "counter", ("value",))
+    collector.increment(family, 3, value="x")
+    assert collector.snapshot().value(family.name, value="x") == 3.0
+
+
+def test_a_label_cannot_shadow_the_observation(collector):
+    from app.metrics.collector import MetricFamily
+
+    family = MetricFamily("pesu_auth_odd_seconds", "doc", "summary", ("seconds",))
+    collector.observe(family, 1.5, seconds="x")
+    assert collector.snapshot().value(f"{family.name}_sum", seconds="x") == 1.5

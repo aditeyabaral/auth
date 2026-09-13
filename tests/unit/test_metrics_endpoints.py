@@ -12,7 +12,7 @@ from app.metrics.prometheus import PROMETHEUS_CONTENT_TYPE
 boom_router = APIRouter()
 
 
-@boom_router.get("/raiseUnhandledForMetrics")
+@boom_router.get("/raiseUnhandledForMetrics", include_in_schema=False)
 async def raise_unhandled():
     raise RuntimeError("Simulated internal server error")
 
@@ -65,6 +65,7 @@ def test_json_format_shape(client):
         "errorsByType",
         "failuresByFault",
         "validationErrorsByField",
+        "profileFieldFiltering",
         "profileParseErrors",
         "upstream",
         "csrfCache",

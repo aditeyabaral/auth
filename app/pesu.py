@@ -19,10 +19,11 @@ from app.exceptions.authentication import (
     ProfileFetchError,
     ProfileParseError,
 )
-from app.metrics import (
+from app.metrics.collector import (
     CSRF_CACHE,
     HTTP_CLIENTS,
     PREFETCH_TASKS,
+    PROFILE_FIELD_FILTERING,
     PROFILE_PARSE_ERRORS,
     UPSTREAM_LATENCY,
     UPSTREAM_REQUESTS,
@@ -76,6 +77,13 @@ async def _upstream_call(metrics: MetricsCollector, operation: str) -> AsyncIter
     started = time.perf_counter()
     try:
         yield sink
+    except asyncio.CancelledError:
+        # Kept apart from "error": a cancellation means we walked away -- a client disconnected or
+        # the process is shutting down -- not that PESU Academy failed. Counting it as an error
+        # would spike the upstream error rate on every deploy and every abandoned request.
+        metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome="cancelled")
+        metrics.observe(UPSTREAM_LATENCY, time.perf_counter() - started, operation=operation)
+        raise
     except BaseException:
         metrics.increment(UPSTREAM_REQUESTS, operation=operation, outcome="error")
         metrics.observe(UPSTREAM_LATENCY, time.perf_counter() - started, operation=operation)
@@ -509,6 +517,10 @@ class PESUAcademy:
                 logging.info(f"Profile data requested for user={username}. Fetching profile data...")
                 # Fetch the profile information
                 result["profile"] = await self.get_profile_information(client, username)
+                # Recorded at the branch itself rather than from the request body, so it reflects
+                # what actually happened: a caller who passes exactly the default field list has
+                # specified fields but triggers no filtering.
+                self._metrics.increment(PROFILE_FIELD_FILTERING, enabled=str(field_filtering).lower())
                 # Filter the fields if field filtering is enabled
                 if field_filtering:
                     result["profile"] = {key: value for key, value in result["profile"].items() if key in fields}

@@ -99,6 +99,12 @@ VALIDATION_ERRORS = MetricFamily(
     "counter",
     ("field",),
 )
+PROFILE_FIELD_FILTERING = MetricFamily(
+    f"{METRIC_PREFIX}profile_field_filtering_total",
+    "Profile fetches, by whether the caller narrowed the fields returned.",
+    "counter",
+    ("enabled",),
+)
 AUTHENTICATION_RESULTS = MetricFamily(
     f"{METRIC_PREFIX}authentication_results_total",
     "Authentication attempts, by outcome.",
@@ -149,7 +155,7 @@ PREFETCH_TASKS = MetricFamily(
 )
 HTTP_CLIENTS = MetricFamily(
     f"{METRIC_PREFIX}http_clients_total",
-    "Lifecycle events for upstream HTTP clients. created minus closed is what is still open.",
+    "Upstream HTTP client lifecycle. created minus closed is how many are still open.",
     "counter",
     ("event",),
 )
@@ -170,6 +176,7 @@ FAMILIES: tuple[MetricFamily, ...] = (
     ERRORS_BY_TYPE,
     AUTHENTICATION_REQUESTS,
     AUTHENTICATION_RESULTS,
+    PROFILE_FIELD_FILTERING,
     PROFILE_PARSE_ERRORS,
     VALIDATION_ERRORS,
     FAILURES_BY_FAULT,
@@ -196,7 +203,7 @@ class MetricsSnapshot:
     uptime_seconds: float
     values: Mapping[str, Mapping[LabelKey, float]]
 
-    def value(self, name: str, **labels: str) -> float:
+    def value(self, name: str, /, **labels: str) -> float:
         """Return a single series value, or 0.0 if it was never recorded.
 
         Args:
@@ -277,19 +284,20 @@ class MetricsCollector:
             raise ValueError(f"{family.name} expects labels {family.labels}, got {tuple(sorted(labels))}.")
         return tuple(sorted(labels.items()))
 
-    def increment(self, family: MetricFamily, value: float = 1.0, **labels: str) -> None:
+    def increment(self, family: MetricFamily, value: float = 1.0, /, **labels: str) -> None:
         """Add to a counter series.
 
         Args:
             family (MetricFamily): The counter family to record against.
-            value (float): The amount to add. Defaults to 1.0.
+            value (float): The amount to add. Defaults to 1.0. Positional-only, so a family may
+                declare a label named "value" without it being captured here instead.
             **labels (str): The label set, which must match the family's declared labels.
         """
         key = self._key(family, labels)
         series = self._values[family.name]
         series[key] = series.get(key, 0.0) + value
 
-    def observe(self, family: MetricFamily, seconds: float, **labels: str) -> None:
+    def observe(self, family: MetricFamily, seconds: float, /, **labels: str) -> None:
         """Record one observation against a summary family's sum and count series.
 
         Args:

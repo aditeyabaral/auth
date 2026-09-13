@@ -6,6 +6,7 @@ from app.metrics.collector import (
     ERRORS_BY_TYPE,
     REQUEST_LATENCY,
     REQUESTS_FAILED,
+    REQUESTS_IN_FLIGHT,
     REQUESTS_SUCCESS,
     REQUESTS_TOTAL,
     RESPONSES_BY_STATUS,
@@ -133,6 +134,28 @@ async def test_cancellation_is_not_recorded(collector):
     assert snapshot.value(REQUESTS_TOTAL.name) == 1.0
     assert snapshot.value(REQUESTS_SUCCESS.name) == 0.0
     assert snapshot.value(REQUESTS_FAILED.name) == 0.0
+    # The gauge must still come back down, or it climbs forever on a server that sees disconnects
+    assert snapshot.value(REQUESTS_IN_FLIGHT.name) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_in_flight_returns_to_zero_on_every_path(collector):
+    """Success, handled failure and raised exception must all leave the gauge where they found it."""
+    await record_request_metrics(collector, FakeRequest(scope()), responding(200))
+    await record_request_metrics(collector, FakeRequest(scope()), responding(401))
+    with pytest.raises(RuntimeError):
+        await record_request_metrics(collector, FakeRequest(scope()), raising(RuntimeError("boom")))
+    assert collector.snapshot().value(REQUESTS_IN_FLIGHT.name) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_in_flight_is_raised_while_a_request_is_being_served(collector):
+    async def call_next(_request):
+        assert collector.snapshot().value(REQUESTS_IN_FLIGHT.name) == 1.0
+        return FakeResponse(200)
+
+    await record_request_metrics(collector, FakeRequest(scope()), call_next)
+    assert collector.snapshot().value(REQUESTS_IN_FLIGHT.name) == 0.0
 
 
 @pytest.mark.asyncio

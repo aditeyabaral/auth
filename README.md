@@ -166,42 +166,8 @@ does not take any request parameters.
 
 ### `/metrics`
 
-This endpoint exposes counters describing the traffic this process has served, in the
-[Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/) by default, ready
-to be scraped, or as JSON with `?fmt=json`.
-
-```
-# HELP pesu_auth_responses_total HTTP responses, by status code.
-# TYPE pesu_auth_responses_total counter
-pesu_auth_responses_total{status="200"} 1094
-pesu_auth_responses_total{status="401"} 160
-```
-
-#### What is measured
-
-| Area            | Metrics                                                                                                                                                                                            |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Traffic         | requests received, succeeded, failed, in flight; responses by status; requests and latency per route                                                                                               |
-| Fault           | failures split into `client` (4xx) and `server` (5xx), so an alert can fire on only our own faults                                                                                                 |
-| Errors          | errors by exception class, and validation failures by the field that failed                                                                                                                        |
-| Authentication  | requests split by whether profile data was asked for, and results by outcome: `success`, `invalid_credentials`, `csrf_token_error`, `profile_fetch_error`, `profile_parse_error`, `internal_error` |
-| Profile parsing | failures by what could not be parsed: `key_missing`, `value_missing`, `unknown_field`, `page_structure`, `no_data`, `unknown_campus_code`                                                          |
-| Upstream        | every call to PESU Academy — `csrf_fetch`, `login`, `profile_fetch` — with count, outcome, latency and the upstream status code                                                                    |
-| Internals       | CSRF cache hit/miss, background refresh outcomes, prefetch task outcomes, HTTP client lifecycle, lifespan events                                                                                   |
-
-`upstream` is the one to look at first when the API is slow: it is the only dependency this service has, and its
-latency is measured separately from the API's own, so a slow request can be attributed to PESU Academy rather than
-guessed at. `httpClients` is the leak indicator — `created` minus `closed` is how many are still open, which should be
-one (the prefetched client) at rest.
-
-The counters live in memory and **reset when the process restarts**, which is why
-`pesu_auth_process_start_time_seconds` is exposed: without it a dashboard cannot tell a restart from a drop in traffic.
-Status codes and exception classes are recorded separately, so errors that share a status code — `CSRFTokenError` and
-`ProfileFetchError` are both `502` — stay distinguishable, and `authenticationResults` records the same failures in the
-vocabulary you would ask questions in.
-
-Requests to `/metrics` are themselves counted. Excluding them would mean the endpoint reported a request total that did
-not match the sum of its own response counts.
+This endpoint exposes counters describing the traffic this process has served and the work it did to serve it. It takes
+no request parameters other than the format selector below.
 
 #### Query Parameters
 
@@ -209,21 +175,372 @@ not match the sum of its own response counts.
 | --------- | -------- | -------------------------------------------------------------------------------------- |
 | `fmt`     | `str`    | `prometheus` (default) for the text exposition format, or `json` for the same counters |
 
-#### Response Object (`fmt=json`)
+The default is `prometheus` because that is what a scraper pointed at this path expects. An unrecognised value is a
+`400`, like any other validation failure.
 
-| **Field**           | **Type** | **Description**                                                            |
-| ------------------- | -------- | -------------------------------------------------------------------------- |
-| `startTimeSeconds`  | `float`  | Start time of this process since the Unix epoch. Counters reset on restart |
-| `uptimeSeconds`     | `float`  | Seconds since this process started collecting                              |
-| `requests`          | `object` | `total`, `success` and `failed` request counts                             |
-| `latency`           | `object` | `sumSeconds`, `count` and `averageSeconds` until a response starts         |
-| `authentication`    | `object` | `total`, `withProfile` and `withoutProfile` authentication request counts  |
-| `responsesByStatus` | `object` | Response counts keyed by HTTP status code                                  |
-| `requestsByRoute`   | `object` | Per-route requests and latency, keyed by `"METHOD route-template"`         |
-| `errorsByType`      | `object` | Error counts keyed by exception class name                                 |
+```bash
+curl http://localhost:5000/metrics                  # Prometheus text, for a scraper
+curl http://localhost:5000/metrics?fmt=json | jq    # the same numbers, for a human
+```
 
-`requests.total` counts a request on arrival while the outcome is recorded on completion, so `total` can briefly exceed
-`success + failed` while requests are in flight.
+#### How collection works
+
+Everything is counted **in this process, in memory**. There is no database and no external dependency, and the counters
+**reset to zero when the process restarts** — which on the hosted environments is often. `processStartTimeSeconds` is
+exposed so a dashboard can tell a restart apart from a drop in traffic; in PromQL, `rate()` already handles counter
+resets, and `pesu_auth_process_start_time_seconds` makes the restart itself visible.
+
+Collection happens at three layers, and which layer records what is deliberate:
+
+| Layer                  | What it records                                                               | Why there                                                                                                                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **HTTP middleware**    | request counts, status codes, matched route, latency, in-flight               | It is the only place that sees every request, including ones that never reach a route                                                                                                             |
+| **Exception handlers** | the error's exception class                                                   | The middleware sees a status code; only the handler knows which class produced it. `CSRFTokenError` and `ProfileFetchError` are both `502`, and the class is the only thing that tells them apart |
+| **`app/pesu.py`**      | upstream calls, CSRF cache, prefetch tasks, client lifecycle, profile parsing | These are not HTTP requests to this API at all, so nothing above could see them                                                                                                                   |
+
+The middleware and the handlers write to **different metric families**, so a single failed request contributes exactly
+one status sample and exactly one error sample — never two of either.
+
+Two accounting rules hold at all times, and are the quickest way to tell whether the numbers are trustworthy:
+
+```
+requests.success + requests.failed + requestsInFlight  ==  requests.total
+sum(responsesByStatus)                                 ==  requests.success + requests.failed
+```
+
+`sum(errorsByType)` is normally **less** than `requests.failed`: a `404` or `405` is produced by the router, so no
+exception handler of ours runs for it.
+
+A few definitions that are easy to assume wrongly:
+
+- **Latency is time to response *start***, not full request duration. The middleware measures up to the point the
+  response begins; the body streams afterwards. It uses a monotonic clock, so an NTP correction cannot corrupt the sum.
+- **Success means a status below 400**, not below 300. `/readme` answers `308`, and that is the endpoint working.
+- **Summaries expose `_sum` and `_count`, not quantiles.** Compute a mean with
+  `rate(pesu_auth_request_latency_seconds_sum[5m]) / rate(pesu_auth_request_latency_seconds_count[5m])`.
+- **Scrapes of `/metrics` count themselves.** Excluding them would break the accounting rules above; subtract
+  `pesu_auth_route_requests_total{route="/metrics"}` if you need traffic without them.
+- **A cancelled request is not recorded as an outcome.** If a caller disconnects, `requests.total` has already counted
+  it but no status ever exists, so `total` legitimately exceeds `success + failed + inFlight` by the number abandoned.
+
+#### What each metric means
+
+**Traffic**
+
+| Metric                                | Meaning                                                                                                                                                                                 |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requests_total`                      | Requests received, counted on arrival                                                                                                                                                   |
+| `requests_success_total`              | Answered with a status below 400                                                                                                                                                        |
+| `requests_failed_total`               | Answered with a status of 400 or above                                                                                                                                                  |
+| `requests_in_flight`                  | Received but not yet answered. A gauge; it is what explains the gap in the totals                                                                                                       |
+| `responses_total{status}`             | Responses by HTTP status code                                                                                                                                                           |
+| `route_requests_total{method,route}`  | Requests by matched route template and method. Never the raw path, so an unmatched path becomes `<unmatched>` rather than a new series per probe, and an unknown verb becomes `<other>` |
+| `request_latency_seconds`             | Time to response start, all routes                                                                                                                                                      |
+| `route_latency_seconds{method,route}` | The same, per route                                                                                                                                                                     |
+
+**Failures**
+
+| Metric                           | Meaning                                                                                                                                                                                                     |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `failures_total{fault}`          | Failed requests by whose fault it was: `client` for 4xx, `server` for 5xx. Alert on `server` without enumerating status codes                                                                               |
+| `errors_total{type}`             | Errors rendered by an exception handler, by exception class: `AuthenticationError`, `CSRFTokenError`, `ProfileFetchError`, `ProfileParseError`, `RequestValidationError`, or whatever reached the catch-all |
+| `validation_errors_total{field}` | Request validation failures by the field that failed. Unrecognised keys collapse into `other`, since the request body is caller-controlled                                                                  |
+
+**Authentication**
+
+| Metric                                   | Meaning                                                                                                                                                                                         |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authentication_requests_total{profile}` | Authentication requests, split by whether profile data was asked for                                                                                                                            |
+| `authentication_results_total{result}`   | Attempts by outcome: `success`, `invalid_credentials`, `csrf_token_error`, `profile_fetch_error`, `profile_parse_error`, `internal_error`. This is the one to read for "why are logins failing" |
+| `profile_field_filtering_total{enabled}` | Profile fetches, split by whether the caller narrowed the returned fields. Recorded where the branch is taken, so a caller passing exactly the default list counts as `false`                   |
+| `profile_parse_errors_total{reason}`     | Parse failures by what broke: `key_missing`, `value_missing`, `unknown_field`, `page_structure`, `no_data`, `unknown_campus_code`. These mean PESU Academy's page changed                       |
+
+**Upstream (PESU Academy)**
+
+PESU Academy is the only dependency this service has, and the only thing that can be slow or down. Its latency is
+measured separately from the API's own, so a slow request can be attributed rather than guessed at. Three operations:
+`csrf_fetch` (the pre-login token), `login`, and `profile_fetch`.
+
+| Metric                                       | Meaning                                                                                                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `upstream_requests_total{operation,outcome}` | Calls by outcome: `success`, `error` (raised, including timeouts), `cancelled` (we walked away — a disconnect or a shutdown, deliberately *not* counted as an error) |
+| `upstream_responses_total{operation,status}` | The status code PESU Academy returned                                                                                                                                |
+| `upstream_latency_seconds{operation}`        | Seconds spent waiting on each operation                                                                                                                              |
+
+A wrong password counts as a **successful** `login` call: PESU answered with a `200` and a login form. The call worked;
+the credentials did not. Likewise a missing CSRF tag is a successful `csrf_fetch` — the fetch worked and our parsing of
+it did not.
+
+**Internals**
+
+| Metric                          | Meaning                                                                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `csrf_cache_total{outcome}`     | `hit` or `miss` on the prefetched CSRF client. A miss means a caller waited on the upstream round trip the prefetch exists to avoid, so the hit rate is how well the prefetch is working          |
+| `csrf_refreshes_total{outcome}` | The periodic background token refresh, by outcome                                                                                                                                                 |
+| `prefetch_tasks_total{outcome}` | Background prefetch tasks: `success`, `failure`, `cancelled`. A failure is not fatal — the cache stays empty and the next request fetches inline                                                  |
+| `http_clients_total{event}`     | `created`, `closed`, `close_failed`. **`created` minus `closed` is how many are still open**, which should be `1` at rest — the prefetched client. A number that climbs is a connection-pool leak |
+| `lifespan_events_total{event}`  | `startup` and `shutdown` seen by this process                                                                                                                                                     |
+| `process_start_time_seconds`    | Start time since the Unix epoch. A gauge, so restarts are visible                                                                                                                                 |
+
+#### Prometheus response
+
+<details>
+<summary>Full example (<code>fmt=prometheus</code>)</summary>
+
+```
+# HELP pesu_auth_requests_total HTTP requests received.
+# TYPE pesu_auth_requests_total counter
+pesu_auth_requests_total 1284
+# HELP pesu_auth_requests_success_total HTTP requests answered with a status below 400.
+# TYPE pesu_auth_requests_success_total counter
+pesu_auth_requests_success_total 1102
+# HELP pesu_auth_requests_failed_total HTTP requests answered with a status of 400 or above.
+# TYPE pesu_auth_requests_failed_total counter
+pesu_auth_requests_failed_total 182
+# HELP pesu_auth_responses_total HTTP responses, by status code.
+# TYPE pesu_auth_responses_total counter
+pesu_auth_responses_total{status="200"} 1094
+pesu_auth_responses_total{status="308"} 8
+pesu_auth_responses_total{status="400"} 12
+pesu_auth_responses_total{status="401"} 160
+pesu_auth_responses_total{status="500"} 4
+pesu_auth_responses_total{status="502"} 6
+# HELP pesu_auth_route_requests_total HTTP requests, by matched route and method.
+# TYPE pesu_auth_route_requests_total counter
+pesu_auth_route_requests_total{method="GET",route="/health"} 302
+pesu_auth_route_requests_total{method="POST",route="/authenticate"} 774
+# HELP pesu_auth_errors_total Errors rendered by an exception handler, by exception class.
+# TYPE pesu_auth_errors_total counter
+pesu_auth_errors_total{type="AuthenticationError"} 160
+pesu_auth_errors_total{type="RequestValidationError"} 12
+# HELP pesu_auth_authentication_requests_total Authentication requests, by whether profile data was requested.
+# TYPE pesu_auth_authentication_requests_total counter
+pesu_auth_authentication_requests_total{profile="false"} 640
+pesu_auth_authentication_requests_total{profile="true"} 134
+# HELP pesu_auth_authentication_results_total Authentication attempts, by outcome.
+# TYPE pesu_auth_authentication_results_total counter
+pesu_auth_authentication_results_total{result="invalid_credentials"} 160
+pesu_auth_authentication_results_total{result="profile_fetch_error"} 2
+pesu_auth_authentication_results_total{result="success"} 612
+# HELP pesu_auth_profile_field_filtering_total Profile fetches, by whether the caller narrowed the fields returned.
+# TYPE pesu_auth_profile_field_filtering_total counter
+pesu_auth_profile_field_filtering_total{enabled="false"} 94
+pesu_auth_profile_field_filtering_total{enabled="true"} 40
+# HELP pesu_auth_profile_parse_errors_total Profile page parse failures, by what could not be parsed.
+# TYPE pesu_auth_profile_parse_errors_total counter
+pesu_auth_profile_parse_errors_total{reason="unknown_field"} 3
+# HELP pesu_auth_validation_errors_total Request validation failures, by the field that failed.
+# TYPE pesu_auth_validation_errors_total counter
+pesu_auth_validation_errors_total{field="password"} 4
+pesu_auth_validation_errors_total{field="username"} 8
+# HELP pesu_auth_failures_total Failed requests, by whose fault it was: the caller's (4xx) or ours (5xx).
+# TYPE pesu_auth_failures_total counter
+pesu_auth_failures_total{fault="client"} 172
+pesu_auth_failures_total{fault="server"} 10
+# HELP pesu_auth_request_latency_seconds Seconds from receiving a request to starting its response.
+# TYPE pesu_auth_request_latency_seconds summary
+pesu_auth_request_latency_seconds_sum 742.1841932
+pesu_auth_request_latency_seconds_count 1284
+# HELP pesu_auth_route_latency_seconds Seconds from receiving a request to starting its response, by route.
+# TYPE pesu_auth_route_latency_seconds summary
+pesu_auth_route_latency_seconds_sum{method="GET",route="/health"} 0.413
+pesu_auth_route_latency_seconds_sum{method="POST",route="/authenticate"} 741.2118
+pesu_auth_route_latency_seconds_count{method="GET",route="/health"} 302
+pesu_auth_route_latency_seconds_count{method="POST",route="/authenticate"} 774
+# HELP pesu_auth_upstream_requests_total Requests made to PESU Academy, by operation and outcome.
+# TYPE pesu_auth_upstream_requests_total counter
+pesu_auth_upstream_requests_total{operation="csrf_fetch",outcome="error"} 3
+pesu_auth_upstream_requests_total{operation="csrf_fetch",outcome="success"} 790
+pesu_auth_upstream_requests_total{operation="login",outcome="cancelled"} 1
+pesu_auth_upstream_requests_total{operation="login",outcome="error"} 2
+pesu_auth_upstream_requests_total{operation="login",outcome="success"} 774
+pesu_auth_upstream_requests_total{operation="profile_fetch",outcome="error"} 1
+pesu_auth_upstream_requests_total{operation="profile_fetch",outcome="success"} 134
+# HELP pesu_auth_upstream_responses_total Responses from PESU Academy, by operation and status code.
+# TYPE pesu_auth_upstream_responses_total counter
+pesu_auth_upstream_responses_total{operation="csrf_fetch",status="200"} 790
+pesu_auth_upstream_responses_total{operation="login",status="200"} 774
+pesu_auth_upstream_responses_total{operation="profile_fetch",status="200"} 134
+# HELP pesu_auth_upstream_latency_seconds Seconds spent waiting on PESU Academy, by operation.
+# TYPE pesu_auth_upstream_latency_seconds summary
+pesu_auth_upstream_latency_seconds_sum{operation="csrf_fetch"} 210.4
+pesu_auth_upstream_latency_seconds_sum{operation="login"} 620.4
+pesu_auth_upstream_latency_seconds_sum{operation="profile_fetch"} 190.2
+pesu_auth_upstream_latency_seconds_count{operation="csrf_fetch"} 793
+pesu_auth_upstream_latency_seconds_count{operation="login"} 776
+pesu_auth_upstream_latency_seconds_count{operation="profile_fetch"} 135
+# HELP pesu_auth_csrf_cache_total Lookups of the cached unauthenticated CSRF client, by whether the cache was warm.
+# TYPE pesu_auth_csrf_cache_total counter
+pesu_auth_csrf_cache_total{outcome="hit"} 760
+pesu_auth_csrf_cache_total{outcome="miss"} 14
+# HELP pesu_auth_csrf_refreshes_total Periodic background refreshes of the unauthenticated CSRF token, by outcome.
+# TYPE pesu_auth_csrf_refreshes_total counter
+pesu_auth_csrf_refreshes_total{outcome="failure"} 1
+pesu_auth_csrf_refreshes_total{outcome="success"} 45
+# HELP pesu_auth_prefetch_tasks_total Background CSRF prefetch tasks, by outcome.
+# TYPE pesu_auth_prefetch_tasks_total counter
+pesu_auth_prefetch_tasks_total{outcome="failure"} 4
+pesu_auth_prefetch_tasks_total{outcome="success"} 770
+# HELP pesu_auth_http_clients_total Upstream HTTP client lifecycle. created minus closed is how many are still open.
+# TYPE pesu_auth_http_clients_total counter
+pesu_auth_http_clients_total{event="closed"} 775
+pesu_auth_http_clients_total{event="created"} 776
+# HELP pesu_auth_lifespan_events_total Application lifespan events, by kind.
+# TYPE pesu_auth_lifespan_events_total counter
+pesu_auth_lifespan_events_total{event="startup"} 1
+# HELP pesu_auth_requests_in_flight Requests received but not yet answered.
+# TYPE pesu_auth_requests_in_flight gauge
+pesu_auth_requests_in_flight 1
+# HELP pesu_auth_process_start_time_seconds Start time of the process since the Unix epoch, in seconds.
+# TYPE pesu_auth_process_start_time_seconds gauge
+pesu_auth_process_start_time_seconds 1757660400.12
+```
+
+</details>
+
+#### JSON response
+
+The same numbers, with labels folded into object keys — `responsesByStatus` keyed by status code, `requestsByRoute` by
+`"METHOD route-template"`, `errorsByType` by exception class. Latency objects add a pre-computed `averageSeconds`,
+which is `null` rather than absent when nothing has been recorded yet, so the shape is stable.
+
+<details>
+<summary>Full example (<code>fmt=json</code>)</summary>
+
+```json
+{
+  "startTimeSeconds": 1757660400.12,
+  "uptimeSeconds": 0.0,
+  "requests": {
+    "total": 1284,
+    "success": 1102,
+    "failed": 182
+  },
+  "latency": {
+    "sumSeconds": 742.1841932,
+    "count": 1284,
+    "averageSeconds": 0.5780250725856698
+  },
+  "authentication": {
+    "total": 774,
+    "withProfile": 134,
+    "withoutProfile": 640
+  },
+  "responsesByStatus": {
+    "200": 1094,
+    "308": 8,
+    "400": 12,
+    "401": 160,
+    "500": 4,
+    "502": 6
+  },
+  "requestsByRoute": {
+    "GET /health": {
+      "requests": 302,
+      "latency": {
+        "sumSeconds": 0.413,
+        "count": 302,
+        "averageSeconds": 0.0013675496688741722
+      }
+    },
+    "POST /authenticate": {
+      "requests": 774,
+      "latency": {
+        "sumSeconds": 741.2118,
+        "count": 774,
+        "averageSeconds": 0.957637984496124
+      }
+    }
+  },
+  "errorsByType": {
+    "AuthenticationError": 160,
+    "RequestValidationError": 12
+  },
+  "requestsInFlight": 1,
+  "failuresByFault": {
+    "client": 172,
+    "server": 10
+  },
+  "validationErrorsByField": {
+    "password": 4,
+    "username": 8
+  },
+  "authenticationResults": {
+    "invalid_credentials": 160,
+    "profile_fetch_error": 2,
+    "success": 612
+  },
+  "profileFieldFiltering": {
+    "false": 94,
+    "true": 40
+  },
+  "profileParseErrors": {
+    "unknown_field": 3
+  },
+  "upstream": {
+    "csrf_fetch": {
+      "success": 790,
+      "error": 3,
+      "cancelled": 0,
+      "latency": {
+        "sumSeconds": 210.4,
+        "count": 793,
+        "averageSeconds": 0.26532156368221943
+      },
+      "responsesByStatus": {
+        "200": 790
+      }
+    },
+    "login": {
+      "success": 774,
+      "error": 2,
+      "cancelled": 1,
+      "latency": {
+        "sumSeconds": 620.4,
+        "count": 776,
+        "averageSeconds": 0.7994845360824742
+      },
+      "responsesByStatus": {
+        "200": 774
+      }
+    },
+    "profile_fetch": {
+      "success": 134,
+      "error": 1,
+      "cancelled": 0,
+      "latency": {
+        "sumSeconds": 190.2,
+        "count": 135,
+        "averageSeconds": 1.4088888888888889
+      },
+      "responsesByStatus": {
+        "200": 134
+      }
+    }
+  },
+  "csrfCache": {
+    "hit": 760,
+    "miss": 14
+  },
+  "csrfRefreshes": {
+    "failure": 1,
+    "success": 45
+  },
+  "prefetchTasks": {
+    "failure": 4,
+    "success": 770
+  },
+  "httpClients": {
+    "closed": 775,
+    "created": 776
+  },
+  "lifespanEvents": {
+    "startup": 1
+  }
+}
+```
+
+</details>
 
 ### `/readme`
 

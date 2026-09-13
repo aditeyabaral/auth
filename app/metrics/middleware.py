@@ -143,9 +143,12 @@ async def record_request_metrics(
         # The exception *type* is recorded by the exception handlers, not here. The two layers write
         # to different families on purpose: one failed request produces exactly one status sample
         # and exactly one error sample, never two of either.
-        collector.increment(REQUESTS_IN_FLIGHT, -1.0)
         _record_outcome(collector, request.scope, EXCEPTION_STATUS, time.perf_counter() - started)
         raise
-    collector.increment(REQUESTS_IN_FLIGHT, -1.0)
+    finally:
+        # In a finally, not in each branch: a client disconnect surfaces as CancelledError, which
+        # is a BaseException and so slips past `except Exception`. Decrementing only in the two
+        # branches above would leave the gauge permanently high after every abandoned request.
+        collector.increment(REQUESTS_IN_FLIGHT, -1.0)
     _record_outcome(collector, request.scope, response.status_code, time.perf_counter() - started)
     return response

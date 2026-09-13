@@ -14,6 +14,7 @@ from app.metrics.collector import (
     LIFESPAN_EVENTS,
     PREFETCH_TASKS,
     PROCESS_START_TIME,
+    PROFILE_FIELD_FILTERING,
     PROFILE_PARSE_ERRORS,
     REQUEST_LATENCY,
     REQUESTS_FAILED,
@@ -64,6 +65,7 @@ def _upstream(snapshot: MetricsSnapshot) -> dict[str, UpstreamOperationModel]:
         operation: UpstreamOperationModel(
             success=counts.get("success", 0),
             error=counts.get("error", 0),
+            cancelled=counts.get("cancelled", 0),
             latency=LatencyModel.from_snapshot(snapshot, UPSTREAM_LATENCY.name, operation=operation),
             responses_by_status=statuses.get(operation, {}),
         )
@@ -98,7 +100,7 @@ class LatencyModel(BaseModel):
     )
 
     @classmethod
-    def from_snapshot(cls, snapshot: MetricsSnapshot, name: str, **labels: str) -> LatencyModel:
+    def from_snapshot(cls, snapshot: MetricsSnapshot, name: str, /, **labels: str) -> LatencyModel:
         """Build a latency view from a snapshot's sum and count series.
 
         Args:
@@ -210,6 +212,13 @@ class UpstreamOperationModel(BaseModel):
         json_schema_extra={"example": 4},
     )
 
+    cancelled: int = Field(
+        ...,
+        title="Cancelled Calls",
+        description="Calls abandoned because the caller disconnected or the process shut down.",
+        json_schema_extra={"example": 1},
+    )
+
     latency: LatencyModel = Field(
         ...,
         title="Upstream Latency",
@@ -317,6 +326,13 @@ class MetricsModel(BaseModel):
         json_schema_extra={"example": {"success": 612, "invalid_credentials": 160, "profile_fetch_error": 2}},
     )
 
+    profile_field_filtering: dict[str, int] = Field(
+        ...,
+        title="Profile Field Filtering",
+        description='Profile fetches keyed by whether the returned fields were narrowed: "true" or "false".',
+        json_schema_extra={"example": {"true": 40, "false": 94}},
+    )
+
     profile_parse_errors: dict[str, int] = Field(
         ...,
         title="Profile Parse Errors",
@@ -419,6 +435,7 @@ class MetricsModel(BaseModel):
             failures_by_fault=_counts(snapshot, FAILURES_BY_FAULT.name, "fault"),
             validation_errors_by_field=_counts(snapshot, VALIDATION_ERRORS.name, "field"),
             authentication_results=_counts(snapshot, AUTHENTICATION_RESULTS.name, "result"),
+            profile_field_filtering=_counts(snapshot, PROFILE_FIELD_FILTERING.name, "enabled"),
             profile_parse_errors=_counts(snapshot, PROFILE_PARSE_ERRORS.name, "reason"),
             upstream=_upstream(snapshot),
             csrf_cache=_counts(snapshot, CSRF_CACHE.name, "outcome"),

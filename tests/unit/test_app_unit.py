@@ -85,7 +85,7 @@ async def test_csrf_token_refresh_loop_waits_before_its_first_refresh(mock_refre
 @patch("asyncio.sleep", new_callable=AsyncMock)
 @patch("app.app._refresh_csrf_token")
 async def test_csrf_token_refresh_loop_records_a_successful_refresh(mock_refresh, mock_sleep, monkeypatch):
-    from app.metrics import CSRF_REFRESHES, MetricsCollector
+    from app.metrics.collector import CSRF_REFRESHES, MetricsCollector
 
     collector = MetricsCollector()
     monkeypatch.setattr("app.app.metrics", collector)

@@ -58,8 +58,8 @@ def test_average_latency_is_the_mean(collector):
 
 
 def test_authentication_total_is_the_sum_of_both_splits(collector):
-    collector.increment(AUTHENTICATION_REQUESTS, profile="true", value=2)
-    collector.increment(AUTHENTICATION_REQUESTS, profile="false", value=5)
+    collector.increment(AUTHENTICATION_REQUESTS, 2, profile="true")
+    collector.increment(AUTHENTICATION_REQUESTS, 5, profile="false")
     model = MetricsModel.from_snapshot(collector.snapshot())
     assert model.authentication.with_profile == 2
     assert model.authentication.without_profile == 5
@@ -165,3 +165,21 @@ def test_in_flight_is_reported(collector):
 
     collector.increment(REQUESTS_IN_FLIGHT)
     assert MetricsModel.from_snapshot(collector.snapshot()).requests_in_flight == 1
+
+
+def test_the_documented_example_matches_the_model():
+    """The Swagger example is what a reader trusts, so it must not drift from the schema."""
+    from app.docs import metrics_docs
+
+    example = metrics_docs.response_examples[200]["content"]["application/json"]["example"]
+    model = MetricsModel.model_validate(example)
+    # Round-trips, so the example uses the camelCase aliases a real response uses
+    assert model.model_dump(by_alias=True) == example
+
+
+def test_the_documented_example_covers_every_field():
+    from app.docs import metrics_docs
+
+    example = metrics_docs.response_examples[200]["content"]["application/json"]["example"]
+    aliases = {field.alias or name for name, field in MetricsModel.model_fields.items()}
+    assert set(example) == aliases

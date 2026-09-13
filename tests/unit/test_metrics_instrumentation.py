@@ -158,3 +158,85 @@ async def test_an_unparseable_profile_page_records_a_reason(pesu, collector):
 def test_a_bare_pesu_academy_still_works():
     """Tests and scripts construct PESUAcademy() directly; it must not require a collector."""
     assert PESUAcademy()._metrics is not None
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.httpx2.AsyncClient.get")
+async def test_a_cancelled_upstream_call_is_not_counted_as_an_error(mock_get, pesu, collector):
+    """A disconnect or a shutdown is not PESU failing.
+
+    Counting cancellation as an upstream error would spike the error rate on every deploy and every
+    abandoned request, which is exactly when someone is looking at the dashboard.
+    """
+    import asyncio
+
+    mock_get.side_effect = asyncio.CancelledError
+    with pytest.raises(asyncio.CancelledError):
+        await pesu._fetch_new_client_with_csrf_token()
+    snapshot = collector.snapshot()
+    assert snapshot.value(UPSTREAM_REQUESTS.name, operation="csrf_fetch", outcome="cancelled") == 1.0
+    assert snapshot.value(UPSTREAM_REQUESTS.name, operation="csrf_fetch", outcome="error") == 0.0
+    # Still timed, so the three outcomes always sum to the number of calls attempted
+    assert snapshot.value(f"{UPSTREAM_LATENCY.name}_count", operation="csrf_fetch") == 1.0
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy.get_profile_information")
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_field_filtering_is_recorded_at_the_branch(mock_client, mock_profile, pesu, collector):
+    """Recorded where the branch is taken, not from the request body.
+
+    A caller who passes exactly the default field list has specified fields but triggers no
+    filtering, so reading the request body would report the wrong thing.
+    """
+    from app.metrics.collector import PROFILE_FIELD_FILTERING
+
+    client = AsyncMock()
+    client.post.return_value = _response('<meta name="csrf-token" content="new">')
+    mock_client.return_value = (client, "token")
+    mock_profile.return_value = {"name": "Test", "prn": "PES1", "email": "a@b.com"}
+
+    await pesu.authenticate("u", "p", profile=True, fields=["name"])
+    await pesu.authenticate("u", "p", profile=True, fields=None)
+    await pesu.authenticate("u", "p", profile=True, fields=list(pesu.DEFAULT_FIELDS))
+
+    snapshot = collector.snapshot()
+    assert snapshot.value(PROFILE_FIELD_FILTERING.name, enabled="true") == 1.0
+    # None and an explicit copy of the defaults both mean "no filtering happened"
+    assert snapshot.value(PROFILE_FIELD_FILTERING.name, enabled="false") == 2.0
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy.get_profile_information")
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_a_login_records_its_upstream_call(mock_client, mock_profile, pesu, collector):
+    client = AsyncMock()
+    client.post.return_value = _response('<meta name="csrf-token" content="new">')
+    mock_client.return_value = (client, "token")
+    mock_profile.return_value = {"name": "Test"}
+
+    await pesu.authenticate("u", "p")
+
+    snapshot = collector.snapshot()
+    assert snapshot.value(UPSTREAM_REQUESTS.name, operation="login", outcome="success") == 1.0
+    assert snapshot.value(UPSTREAM_RESPONSES.name, operation="login", status="200") == 1.0
+    # The client this request borrowed is closed on the way out, on every path
+    assert snapshot.value(HTTP_CLIENTS.name, event="closed") == 1.0
+
+
+@pytest.mark.asyncio
+@patch("app.pesu.PESUAcademy._get_client_with_csrf_token")
+async def test_a_wrong_password_still_counts_the_login_as_reaching_pesu(mock_client, pesu, collector):
+    """PESU answered with a 200 and a login form. The call worked; the credentials did not."""
+    from app.exceptions.authentication import AuthenticationError
+
+    client = AsyncMock()
+    client.post.return_value = _response('<div class="login-form"></div>')
+    mock_client.return_value = (client, "token")
+
+    with pytest.raises(AuthenticationError):
+        await pesu.authenticate("u", "wrong")
+
+    snapshot = collector.snapshot()
+    assert snapshot.value(UPSTREAM_REQUESTS.name, operation="login", outcome="success") == 1.0
+    assert snapshot.value(UPSTREAM_REQUESTS.name, operation="login", outcome="error") == 0.0
