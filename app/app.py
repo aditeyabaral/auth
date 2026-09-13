@@ -20,11 +20,15 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from fastapi.requests import Request
+    from fastapi.responses import Response
+    from starlette.middleware.base import RequestResponseEndpoint
 
 from pydantic import ValidationError
 
 from app.docs import authenticate_docs, health_docs, readme_docs
 from app.exceptions.base import PESUAcademyError
+from app.metrics import AUTHENTICATION_REQUESTS, ERRORS_BY_TYPE, MetricsCollector
+from app.metrics.middleware import record_request_metrics
 from app.models import RequestModel, ResponseModel
 from app.pesu import PESUAcademy
 
@@ -100,11 +104,21 @@ app = FastAPI(
     ],
 )
 pesu_academy = PESUAcademy()
+metrics = MetricsCollector()
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    """Record traffic metrics for every request."""
+    # Looks the collector up on the module at call time rather than capturing it, so a test can
+    # swap in a fresh one with monkeypatch.setattr("app.app.metrics", ...).
+    return await record_request_metrics(metrics, request, call_next)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Handler for request validation errors."""
+    metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     errors = exc.errors()
     # Log only the shape of the failure, never the submitted values. Each entry from `errors()`
     # carries an "input" key which, for a missing required field, is the *entire request body* --
@@ -126,6 +140,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(PESUAcademyError)
 async def pesu_exception_handler(request: Request, exc: PESUAcademyError) -> JSONResponse:
     """Handler for PESUAcademy specific errors."""
+    metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     # Severity follows the status code. A 4xx is an expected outcome -- a wrong password is the
     # API working correctly -- and logging one at ERROR with a traceback both buries real faults
     # and pages whoever alerts on the error rate. Only 5xx gets a stack trace.
@@ -146,6 +161,7 @@ async def pesu_exception_handler(request: Request, exc: PESUAcademyError) -> JSO
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handler for unhandled exceptions."""
+    metrics.increment(ERRORS_BY_TYPE, type=type(exc).__name__)
     logging.exception("Unhandled exception occurred.")
     return JSONResponse(
         status_code=500,
@@ -214,6 +230,11 @@ async def authenticate(payload: RequestModel) -> JSONResponse:
 
     # Authenticate the user
     authentication_result = {"timestamp": current_time}
+    # Recorded here rather than in the middleware: the profile flag lives in the request body, and
+    # reading the body in middleware would consume the downstream receive channel and pull a
+    # payload containing a plaintext password into another layer. How many auth requests arrive is
+    # already answered by route_requests_total; only the split needs the body.
+    metrics.increment(AUTHENTICATION_REQUESTS, profile=str(profile).lower())
     logging.info(f"Authenticating user={username} with PESU Academy...")
     authentication_result.update(
         await pesu_academy.authenticate(
