@@ -53,13 +53,32 @@ def test_authenticate_general_exception(mock_authenticate, client):
 @patch("app.app._refresh_csrf_token")
 async def test_csrf_token_refresh_loop_logs_exception_on_failure(mock_refresh, mock_sleep, caplog):
     mock_refresh.side_effect = RuntimeError("Simulated CSRF refresh failure")
-    mock_sleep.side_effect = asyncio.CancelledError
+    # The loop sleeps before its first refresh, so let the first sleep pass and stop it on the next
+    mock_sleep.side_effect = [None, asyncio.CancelledError]
 
     with caplog.at_level("ERROR"):
         with pytest.raises(asyncio.CancelledError):
             await _csrf_token_refresh_loop()
 
     assert "Failed to refresh unauthenticated CSRF token in the background." in caplog.text
+
+
+@pytest.mark.asyncio
+@patch("asyncio.sleep", new_callable=AsyncMock)
+@patch("app.app._refresh_csrf_token")
+async def test_csrf_token_refresh_loop_waits_before_its_first_refresh(mock_refresh, mock_sleep):
+    """lifespan has already primed the cache when this task starts.
+
+    Refreshing immediately fetched a second token and discarded the one just prefetched -- an extra
+    upstream round trip on every startup. Caught by the new upstream metrics showing two csrf_fetch
+    calls on an idle process.
+    """
+    mock_sleep.side_effect = asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _csrf_token_refresh_loop()
+
+    mock_refresh.assert_not_awaited()
 
 
 def test_lifespan_logs_a_refresh_task_that_refuses_to_cancel(caplog):

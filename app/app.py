@@ -71,6 +71,10 @@ async def _refresh_csrf_token() -> None:
 async def _csrf_token_refresh_loop() -> None:
     """Background task to refresh the CSRF token periodically."""
     while True:
+        # Sleep first. `lifespan` has already primed the cache by the time this task starts, so
+        # refreshing immediately would fetch a second token and throw away the one just prefetched
+        # -- an extra upstream round trip on every single startup.
+        await asyncio.sleep(CSRF_TOKEN_REFRESH_INTERVAL_SECONDS)
         try:
             logging.debug("Refreshing unauthenticated CSRF token...")
             await _refresh_csrf_token()
@@ -79,7 +83,6 @@ async def _csrf_token_refresh_loop() -> None:
             logging.exception("Failed to refresh unauthenticated CSRF token in the background.")
         else:
             metrics.increment(CSRF_REFRESHES, outcome="success")
-        await asyncio.sleep(CSRF_TOKEN_REFRESH_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
