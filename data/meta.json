@@ -1,0 +1,551 @@
+{
+  "static": {
+    "alpine": {
+      "gzip_bytes": 24037114,
+      "openssl": "OpenSSL 3.5.9 29 Sep 2026 ('musl', '1')",
+      "image_size_bytes": 101717224,
+      "layers": 8,
+      "image_ls": {
+        "Containers": "0",
+        "CreatedAt": "2026-10-22 09:40:42 -0500 CDT",
+        "CreatedSince": "2 hours ago",
+        "Digest": "<none>",
+        "ID": "5d6b140ee883",
+        "Repository": "pesu-auth",
+        "SharedSize": "N/A",
+        "Size": "102MB",
+        "Tag": "bench-alpine",
+        "UniqueSize": "N/A"
+      }
+    },
+    "slim": {
+      "gzip_bytes": 50313407,
+      "openssl": "OpenSSL 3.0.22 25 Aug 2026 ('glibc', '2.36')",
+      "image_size_bytes": 210228700,
+      "layers": 8,
+      "image_ls": {
+        "Containers": "0",
+        "CreatedAt": "2026-10-22 09:40:34 -0500 CDT",
+        "CreatedSince": "2 hours ago",
+        "Digest": "<none>",
+        "ID": "bb2869aaffb4",
+        "Repository": "pesu-auth",
+        "SharedSize": "N/A",
+        "Size": "210MB",
+        "Tag": "bench-slim",
+        "UniqueSize": "N/A"
+      }
+    },
+    "trixie": {
+      "gzip_bytes": 49231736,
+      "openssl": "OpenSSL 3.5.7 9 Jun 2026 ('glibc', '2.41')",
+      "image_size_bytes": 205577783,
+      "layers": 8,
+      "image_ls": {
+        "Containers": "0",
+        "CreatedAt": "2026-10-22 10:37:02 -0500 CDT",
+        "CreatedSince": "About an hour ago",
+        "Digest": "<none>",
+        "ID": "8520ace69953",
+        "Repository": "pesu-auth",
+        "SharedSize": "N/A",
+        "Size": "206MB",
+        "Tag": "bench-trixie",
+        "UniqueSize": "N/A"
+      }
+    }
+  },
+  "final": {
+    "alpine": {
+      "mem": {
+        "cg_current": 47824896,
+        "cg_peak": 50900992,
+        "cg_anon": 46100480,
+        "rss_kb": 60176,
+        "hwm_kb": 60536
+      },
+      "cpu": {
+        "usage_usec": 7338777,
+        "user_usec": 5962927,
+        "system_usec": 1375849
+      },
+      "idle_cpu": {
+        "usage_usec": 1423221,
+        "user_usec": 1132992,
+        "system_usec": 290229
+      },
+      "idle_mem": {
+        "cg_current": 44924928,
+        "cg_peak": 46686208,
+        "cg_anon": 43352064,
+        "rss_kb": 56268,
+        "hwm_kb": 56268
+      },
+      "size_rw": 4096,
+      "size_rootfs": 77602816,
+      "docker_stats": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.19%",
+        "Container": "feca6347695ca03c85ac10d9691a9a79ae913fe1f69fa7c04955797d641a5da1",
+        "ID": "feca6347695c",
+        "MemPerc": "0.15%",
+        "MemUsage": "45.61MiB / 30.2GiB",
+        "Name": "pesu-bench-alpine-5001-1792688643637509176",
+        "NetIO": "35.9MB / 1.28MB",
+        "PIDs": "3"
+      },
+      "metrics": {
+        "startTimeSeconds": 1792688645.1731172,
+        "uptimeSeconds": 927.0603682994843,
+        "requests": {
+          "total": 209,
+          "success": 208,
+          "failed": 0
+        },
+        "latency": {
+          "sumSeconds": 305.4631326809831,
+          "count": 208,
+          "averageSeconds": 1.4685727532739572
+        },
+        "authentication": {
+          "total": 101,
+          "withProfile": 101,
+          "withoutProfile": 0
+        },
+        "responsesByStatus": {
+          "200": 208
+        },
+        "requestsByRoute": {
+          "GET /health": {
+            "requests": 1,
+            "latency": {
+              "sumSeconds": 0.0007750730001134798,
+              "count": 1,
+              "averageSeconds": 0.0007750730001134798
+            }
+          },
+          "GET /metrics": {
+            "requests": 106,
+            "latency": {
+              "sumSeconds": 0.07414370798323944,
+              "count": 106,
+              "averageSeconds": 0.0006994689432381079
+            }
+          },
+          "POST /authenticate": {
+            "requests": 101,
+            "latency": {
+              "sumSeconds": 305.38821389999976,
+              "count": 101,
+              "averageSeconds": 3.0236456821782154
+            }
+          }
+        },
+        "errorsByType": {},
+        "requestsInFlight": 1,
+        "failuresByFault": {},
+        "validationErrorsByField": {},
+        "authenticationResults": {
+          "success": 101
+        },
+        "profileFieldFiltering": {
+          "false": 101
+        },
+        "profileParseErrors": {},
+        "upstream": {
+          "login": {
+            "success": 101,
+            "error": 0,
+            "cancelled": 0,
+            "latency": {
+              "sumSeconds": 221.74413193399778,
+              "count": 101,
+              "averageSeconds": 2.195486454792057
+            },
+            "responsesByStatus": {
+              "200": 101
+            }
+          },
+          "profile_fetch": {
+            "success": 101,
+            "error": 0,
+            "cancelled": 0,
+            "latency": {
+              "sumSeconds": 83.18971808101378,
+              "count": 101,
+              "averageSeconds": 0.8236605750595424
+            },
+            "responsesByStatus": {
+              "200": 101
+            }
+          }
+        },
+        "httpClients": {
+          "closed": 101,
+          "created": 101
+        },
+        "lifespanEvents": {
+          "startup": 1
+        }
+      }
+    },
+    "slim": {
+      "mem": {
+        "cg_current": 48623616,
+        "cg_peak": 50765824,
+        "cg_anon": 46862336,
+        "rss_kb": 62152,
+        "hwm_kb": 62152
+      },
+      "cpu": {
+        "usage_usec": 7587695,
+        "user_usec": 7044108,
+        "system_usec": 543586
+      },
+      "idle_cpu": {
+        "usage_usec": 906078,
+        "user_usec": 835994,
+        "system_usec": 70083
+      },
+      "idle_mem": {
+        "cg_current": 45727744,
+        "cg_peak": 47288320,
+        "cg_anon": 44138496,
+        "rss_kb": 58324,
+        "hwm_kb": 58324
+      },
+      "size_rw": 4096,
+      "size_rootfs": 159535104,
+      "docker_stats": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.19%",
+        "Container": "a3edb84d262eefea8969873e56e2aabe1d8fafecb200e166bcefe4ff7995e964",
+        "ID": "a3edb84d262e",
+        "MemPerc": "0.15%",
+        "MemUsage": "46.37MiB / 30.2GiB",
+        "Name": "pesu-bench-slim-5002-1792688645229070742",
+        "NetIO": "35.9MB / 1.19MB",
+        "PIDs": "3"
+      },
+      "metrics": {
+        "startTimeSeconds": 1792688646.2747326,
+        "uptimeSeconds": 927.9652600288391,
+        "requests": {
+          "total": 209,
+          "success": 208,
+          "failed": 0
+        },
+        "latency": {
+          "sumSeconds": 306.96242624101797,
+          "count": 208,
+          "averageSeconds": 1.4757808953895095
+        },
+        "authentication": {
+          "total": 101,
+          "withProfile": 101,
+          "withoutProfile": 0
+        },
+        "responsesByStatus": {
+          "200": 208
+        },
+        "requestsByRoute": {
+          "GET /health": {
+            "requests": 1,
+            "latency": {
+              "sumSeconds": 0.0006072870000934927,
+              "count": 1,
+              "averageSeconds": 0.0006072870000934927
+            }
+          },
+          "GET /metrics": {
+            "requests": 106,
+            "latency": {
+              "sumSeconds": 0.08805427501465601,
+              "count": 106,
+              "averageSeconds": 0.0008307007076854341
+            }
+          },
+          "POST /authenticate": {
+            "requests": 101,
+            "latency": {
+              "sumSeconds": 306.8737646790032,
+              "count": 101,
+              "averageSeconds": 3.0383541057327053
+            }
+          }
+        },
+        "errorsByType": {},
+        "requestsInFlight": 1,
+        "failuresByFault": {},
+        "validationErrorsByField": {},
+        "authenticationResults": {
+          "success": 101
+        },
+        "profileFieldFiltering": {
+          "false": 101
+        },
+        "profileParseErrors": {},
+        "upstream": {
+          "login": {
+            "success": 101,
+            "error": 0,
+            "cancelled": 0,
+            "latency": {
+              "sumSeconds": 222.19093113800045,
+              "count": 101,
+              "averageSeconds": 2.199910209287133
+            },
+            "responsesByStatus": {
+              "200": 101
+            }
+          },
+          "profile_fetch": {
+            "success": 101,
+            "error": 0,
+            "cancelled": 0,
+            "latency": {
+              "sumSeconds": 84.29464462700344,
+              "count": 101,
+              "averageSeconds": 0.8346004418515192
+            },
+            "responsesByStatus": {
+              "200": 101
+            }
+          }
+        },
+        "httpClients": {
+          "closed": 101,
+          "created": 101
+        },
+        "lifespanEvents": {
+          "startup": 1
+        }
+      }
+    },
+    "trixie": {
+      "mem": {
+        "cg_current": 48746496,
+        "cg_peak": 50814976,
+        "cg_anon": 46985216,
+        "rss_kb": 63476,
+        "hwm_kb": 63476
+      },
+      "cpu": {
+        "usage_usec": 5866251,
+        "user_usec": 5254710,
+        "system_usec": 611541
+      },
+      "idle_cpu": {
+        "usage_usec": 899766,
+        "user_usec": 823361,
+        "system_usec": 76404
+      },
+      "idle_mem": {
+        "cg_current": 46231552,
+        "cg_peak": 47013888,
+        "cg_anon": 44376064,
+        "rss_kb": 58952,
+        "hwm_kb": 58952
+      },
+      "size_rw": 4096,
+      "size_rootfs": 156020736,
+      "docker_stats": {
+        "BlockIO": "0B / 0B",
+        "CPUPerc": "0.20%",
+        "Container": "e606602d5996d8038431b1b75b83b39c21e84be211d8089d10818f55427d9f1c",
+        "ID": "e606602d5996",
+        "MemPerc": "0.15%",
+        "MemUsage": "46.49MiB / 30.2GiB",
+        "Name": "pesu-bench-trixie-5003-1792688646321407696",
+        "NetIO": "35.9MB / 1.28MB",
+        "PIDs": "3"
+      },
+      "metrics": {
+        "startTimeSeconds": 1792688647.3643546,
+        "uptimeSeconds": 928.8823885917664,
+        "requests": {
+          "total": 209,
+          "success": 208,
+          "failed": 0
+        },
+        "latency": {
+          "sumSeconds": 304.6302289209616,
+          "count": 208,
+          "averageSeconds": 1.464568408273854
+        },
+        "authentication": {
+          "total": 101,
+          "withProfile": 101,
+          "withoutProfile": 0
+        },
+        "responsesByStatus": {
+          "200": 208
+        },
+        "requestsByRoute": {
+          "GET /health": {
+            "requests": 1,
+            "latency": {
+              "sumSeconds": 0.0006091300001571653,
+              "count": 1,
+              "averageSeconds": 0.0006091300001571653
+            }
+          },
+          "GET /metrics": {
+            "requests": 106,
+            "latency": {
+              "sumSeconds": 0.08469576498646347,
+              "count": 106,
+              "averageSeconds": 0.0007990166508156932
+            }
+          },
+          "POST /authenticate": {
+            "requests": 101,
+            "latency": {
+              "sumSeconds": 304.544924025975,
+              "count": 101,
+              "averageSeconds": 3.0152962774849006
+            }
+          }
+        },
+        "errorsByType": {},
+        "requestsInFlight": 1,
+        "failuresByFault": {},
+        "validationErrorsByField": {},
+        "authenticationResults": {
+          "success": 101
+        },
+        "profileFieldFiltering": {
+          "false": 101
+        },
+        "profileParseErrors": {},
+        "upstream": {
+          "login": {
+            "success": 101,
+            "error": 0,
+            "cancelled": 0,
+            "latency": {
+              "sumSeconds": 220.3721303070106,
+              "count": 101,
+              "averageSeconds": 2.1819022802674315
+            },
+            "responsesByStatus": {
+              "200": 101
+            }
+          },
+          "profile_fetch": {
+            "success": 101,
+            "error": 0,
+            "cancelled": 0,
+            "latency": {
+              "sumSeconds": 83.77954531299474,
+              "count": 101,
+              "averageSeconds": 0.8295004486435122
+            },
+            "responsesByStatus": {
+              "200": 101
+            }
+          }
+        },
+        "httpClients": {
+          "closed": 101,
+          "created": 101
+        },
+        "lifespanEvents": {
+          "startup": 1
+        }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "block": "warmup",
+      "image": "alpine",
+      "wall_s": 3.2566568329984875,
+      "cpu_s": 0.077085
+    },
+    {
+      "block": "warmup",
+      "image": "slim",
+      "wall_s": 3.0930060200007574,
+      "cpu_s": 0.071343
+    },
+    {
+      "block": "warmup",
+      "image": "trixie",
+      "wall_s": 2.7486554330007493,
+      "cpu_s": 0.052759
+    },
+    {
+      "block": 0,
+      "image": "alpine",
+      "wall_s": 76.12420646400096,
+      "cpu_s": 1.103233
+    },
+    {
+      "block": 1,
+      "image": "slim",
+      "wall_s": 77.92419868599973,
+      "cpu_s": 1.359859
+    },
+    {
+      "block": 2,
+      "image": "trixie",
+      "wall_s": 75.08148847800112,
+      "cpu_s": 0.984018
+    },
+    {
+      "block": 3,
+      "image": "trixie",
+      "wall_s": 75.90704770000048,
+      "cpu_s": 0.952824
+    },
+    {
+      "block": 4,
+      "image": "slim",
+      "wall_s": 74.80712399699951,
+      "cpu_s": 1.351296
+    },
+    {
+      "block": 5,
+      "image": "alpine",
+      "wall_s": 75.30849119199956,
+      "cpu_s": 1.193789
+    },
+    {
+      "block": 6,
+      "image": "slim",
+      "wall_s": 75.83041198399951,
+      "cpu_s": 1.414298
+    },
+    {
+      "block": 7,
+      "image": "trixie",
+      "wall_s": 76.8286441600012,
+      "cpu_s": 0.976315
+    },
+    {
+      "block": 8,
+      "image": "alpine",
+      "wall_s": 75.40251740200074,
+      "cpu_s": 1.154169
+    },
+    {
+      "block": 9,
+      "image": "alpine",
+      "wall_s": 75.95831885500229,
+      "cpu_s": 1.206827
+    },
+    {
+      "block": 10,
+      "image": "trixie",
+      "wall_s": 74.63925967599789,
+      "cpu_s": 0.985853
+    },
+    {
+      "block": 11,
+      "image": "slim",
+      "wall_s": 75.86879099299767,
+      "cpu_s": 1.434067
+    }
+  ]
+}
